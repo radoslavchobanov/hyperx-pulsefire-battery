@@ -4,10 +4,11 @@
 
 HyperX only provides NGenuity (Windows-only) for configuring their mice. This project provides a complete Linux alternative, communicating directly with the mouse over USB HID to configure all settings — battery monitoring, LED effects, DPI profiles, button mapping, macros, and more.
 
-![Linux](https://img.shields.io/badge/platform-Linux-blue)
-![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-green)
-![License: MIT](https://img.shields.io/badge/license-MIT-yellow)
-![Qt5](https://img.shields.io/badge/GUI-Qt5-41cd52)
+[![PyPI](https://img.shields.io/pypi/v/hyperx-pulsefire-battery)](https://pypi.org/project/hyperx-pulsefire-battery/)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-green)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
+[![Linux](https://img.shields.io/badge/platform-Linux-blue)](https://kernel.org/)
+[![Qt5](https://img.shields.io/badge/GUI-Qt5-41cd52)](https://www.qt.io/)
 
 ---
 
@@ -54,18 +55,7 @@ The protocol may work with other HyperX mice using the NGenuity2 protocol.
 
 ## Installation
 
-### Option 1: Arch Linux / Manjaro (PKGBUILD)
-
-```bash
-# Clone the repository
-git clone https://github.com/radoslavchobanov/hyperx-pulsefire-battery.git
-cd hyperx-pulsefire-battery
-
-# Build and install the package
-makepkg -si
-```
-
-### Option 2: pip install
+### Option 1: pip (Recommended)
 
 #### 1. Install system dependencies
 
@@ -84,25 +74,38 @@ sudo apt install libhidapi-hidraw0 python3-pyqt5 python3-pyudev
 sudo dnf install hidapi python3-qt5 python3-pyudev
 ```
 
-#### 2. Install the package
+#### 2. Install from PyPI
 
 ```bash
-# Full installation with GUI
-pip install ".[tray]"
+# Full installation with GUI (recommended)
+pip install "hyperx-pulsefire-battery[tray]"
 
 # CLI only (no Qt dependencies)
-pip install .
+pip install hyperx-pulsefire-battery
 ```
 
 #### 3. Set up udev rules (required for non-root access)
 
 ```bash
-sudo cp 99-hyperx-pulsefire.rules /etc/udev/rules.d/
+# Download and install udev rules
+sudo curl -o /etc/udev/rules.d/99-hyperx-pulsefire.rules \
+  https://raw.githubusercontent.com/radoslavchobanov/hyperx-pulsefire-battery/master/99-hyperx-pulsefire.rules
 sudo udevadm control --reload-rules
 sudo udevadm trigger
 ```
 
 Then **unplug and replug** your wireless dongle.
+
+### Option 2: Arch Linux / Manjaro (PKGBUILD)
+
+```bash
+# Clone the repository
+git clone https://github.com/radoslavchobanov/hyperx-pulsefire-battery.git
+cd hyperx-pulsefire-battery
+
+# Build and install the package (includes udev rules)
+makepkg -si
+```
 
 ---
 
@@ -209,6 +212,33 @@ Remap any of the 6 buttons:
 - **Polling Rate**: 125 / 250 / 500 / 1000 Hz
 - **Battery Alert Threshold**: 5-25%
 
+### User Configuration File
+
+The tray application stores user preferences in `~/.config/hyperx-pulsefire/config.json`:
+
+```json
+{
+  "notifications": {
+    "enabled": true,
+    "thresholds": [20, 10, 5],
+    "charging_notify": true,
+    "full_notify": true
+  },
+  "polling": {
+    "interval_seconds": 60,
+    "retry_delay_seconds": 2,
+    "max_retries": 5
+  },
+  "tray": {
+    "show_percentage_text": true,
+    "charging_animation": true,
+    "animation_fps": 7
+  }
+}
+```
+
+Edit this file to customize notification thresholds, polling intervals, and tray behavior.
+
 ---
 
 ## Protocol Documentation
@@ -254,6 +284,7 @@ hyperx-pulsefire-battery/
 │   ├── __init__.py
 │   ├── protocol.py      # Protocol constants, packet builders, parsers
 │   ├── device.py        # HyperXDevice class, HID communication
+│   ├── config.py        # User configuration management
 │   ├── cli.py           # Command-line interface
 │   ├── tray.py          # System tray application
 │   ├── panel.py         # Configuration panel (Plasma-style popup)
