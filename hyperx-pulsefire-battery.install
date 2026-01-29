@@ -1,0 +1,25 @@
+post_install() {
+    echo ">>> Reloading udev rules..."
+    udevadm control --reload-rules
+    udevadm trigger
+    echo ""
+    echo ">>> HyperX Pulsefire Dart Configuration Tool installed!"
+    echo ""
+    echo "    To start the tray application:"
+    echo "      hyperx-battery-tray &"
+    echo ""
+    echo "    CLI usage:"
+    echo "      hyperx-battery"
+    echo ""
+    echo "    If the device is not detected, unplug and replug the wireless dongle."
+    echo ""
+}
+
+post_upgrade() {
+    post_install
+}
+
+post_remove() {
+    echo ">>> Reloading udev rules..."
+    udevadm control --reload-rules
+}

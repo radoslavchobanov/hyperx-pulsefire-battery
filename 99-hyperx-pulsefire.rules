@@ -1,0 +1,17 @@
+# udev rules for HyperX Pulsefire Dart mouse
+# Allows non-root access to the HID interface for battery monitoring
+#
+# Installation:
+#   sudo cp 99-hyperx-pulsefire.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules
+#   sudo udevadm trigger
+#
+# Then unplug and replug the mouse/dongle
+
+# HyperX Pulsefire Dart - Wireless Dongle
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0951", ATTRS{idProduct}=="16e1", MODE="0666"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0951", ATTRS{idProduct}=="16e1", MODE="0666"
+
+# HyperX Pulsefire Dart - Wired Mode
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0951", ATTRS{idProduct}=="16e2", MODE="0666"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0951", ATTRS{idProduct}=="16e2", MODE="0666"

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=HyperX Pulsefire Configuration
+Comment=Full configuration tool and battery monitor for HyperX Pulsefire Dart wireless mouse
+Exec=hyperx-battery-tray
+Icon=input-mouse
+Type=Application
+Terminal=false
+Categories=Utility;System;HardwareSettings;
+Keywords=hyperx;mouse;gaming;battery;dpi;led;rgb;
+X-GNOME-Autostart-enabled=true
+StartupNotify=false
