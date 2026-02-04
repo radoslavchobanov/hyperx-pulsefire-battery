@@ -6,6 +6,7 @@
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
+import QtQuick.Dialogs
 import org.kde.plasma.plasmoid
 import org.kde.plasma.components as PlasmaComponents
 import org.kde.plasma.extras as PlasmaExtras
@@ -37,10 +38,11 @@ PlasmoidItem {
     property string ledEffect: ""
     property string ledTarget: ""
     property string ledColor: "#000000"
-    property int ledBrightness: 0
+    property int ledBrightness: 100
     property int ledSpeed: 0
 
     property string currentTab: "info"
+    property bool showColorPicker: false
 
     Plasmoid.icon: Qt.resolvedUrl("../icons/mouse-battery.svg")
     toolTipMainText: "PlasmaNGenuity"
@@ -74,6 +76,17 @@ PlasmoidItem {
         executable.connectSource("python3 " + backendPath)
     }
 
+    function setDpiProfile(profile) {
+        executable.connectSource("python3 " + backendPath + " --set-dpi " + profile)
+    }
+
+    function setLedColor(color) {
+        var r = parseInt(color.substr(1, 2), 16)
+        var g = parseInt(color.substr(3, 2), 16)
+        var b = parseInt(color.substr(5, 2), 16)
+        executable.connectSource("python3 " + backendPath + " --set-led " + r + "," + g + "," + b + " --brightness " + root.ledBrightness)
+    }
+
     P5Support.DataSource {
         id: executable
         engine: "executable"
@@ -82,16 +95,25 @@ PlasmoidItem {
         onNewData: (source, data) => {
             var stdout = data["stdout"]
             disconnectSource(source)
-            root.loading = false
 
             if (!stdout || stdout.trim() === "") {
-                root.connected = false
-                root.lastError = "No output from backend"
+                root.loading = false
                 return
             }
 
             try {
                 var result = JSON.parse(stdout)
+
+                // Handle write command responses
+                if (result.success !== undefined) {
+                    // Refresh after successful write
+                    if (result.success) {
+                        Qt.callLater(refresh)
+                    }
+                    return
+                }
+
+                root.loading = false
 
                 if (result.error && !result.connected) {
                     root.connected = false
@@ -106,7 +128,6 @@ PlasmoidItem {
                 root.connectionMode = result.mode || ""
                 root.lastError = ""
 
-                // Hardware info
                 if (result.hw_info) {
                     root.firmware = result.hw_info.firmware || ""
                     root.deviceName = result.hw_info.device_name || ""
@@ -114,24 +135,23 @@ PlasmoidItem {
                     root.productId = result.hw_info.product_id || ""
                 }
 
-                // DPI settings
                 if (result.dpi) {
                     root.dpiProfiles = result.dpi.profiles || []
                     root.activeDpiProfile = result.dpi.active_profile || 0
                 }
 
-                // LED settings
                 if (result.led) {
                     root.ledEffect = result.led.effect || ""
                     root.ledTarget = result.led.target || ""
                     root.ledColor = result.led.color || "#000000"
-                    root.ledBrightness = result.led.brightness || 0
+                    root.ledBrightness = result.led.brightness || 100
                     root.ledSpeed = result.led.speed || 0
                 }
 
             } catch (e) {
                 root.connected = false
                 root.lastError = "Parse error"
+                root.loading = false
             }
         }
     }
@@ -144,7 +164,7 @@ PlasmoidItem {
         onTriggered: refresh()
     }
 
-    // Compact representation - square mouse icon with battery fill
+    // Compact representation
     compactRepresentation: Item {
         id: compactRoot
 
@@ -166,85 +186,52 @@ PlasmoidItem {
 
             onPaint: {
                 var ctx = getContext("2d");
-                var w = width;
-                var h = height;
+                var w = width; var h = height;
                 ctx.clearRect(0, 0, w, h);
+                var sx = w / 64; var sy = h / 64;
 
-                var sx = w / 64;
-                var sy = h / 64;
-
-                // Mouse body
                 ctx.beginPath();
-                ctx.moveTo(16 * sx, 14 * sy);
-                ctx.lineTo(16 * sx, 52 * sy);
-                ctx.quadraticCurveTo(16 * sx, 58 * sy, 22 * sx, 58 * sy);
-                ctx.lineTo(42 * sx, 58 * sy);
-                ctx.quadraticCurveTo(48 * sx, 58 * sy, 48 * sx, 52 * sy);
-                ctx.lineTo(48 * sx, 14 * sy);
-                ctx.quadraticCurveTo(48 * sx, 6 * sy, 32 * sx, 6 * sy);
-                ctx.quadraticCurveTo(16 * sx, 6 * sy, 16 * sx, 14 * sy);
+                ctx.moveTo(16*sx, 14*sy); ctx.lineTo(16*sx, 52*sy);
+                ctx.quadraticCurveTo(16*sx, 58*sy, 22*sx, 58*sy);
+                ctx.lineTo(42*sx, 58*sy);
+                ctx.quadraticCurveTo(48*sx, 58*sy, 48*sx, 52*sy);
+                ctx.lineTo(48*sx, 14*sy);
+                ctx.quadraticCurveTo(48*sx, 6*sy, 32*sx, 6*sy);
+                ctx.quadraticCurveTo(16*sx, 6*sy, 16*sx, 14*sy);
                 ctx.closePath();
+                ctx.fillStyle = "#3c3c3c"; ctx.fill();
 
-                ctx.fillStyle = "#3c3c3c";
-                ctx.fill();
-
-                // Battery fill
                 if (root.connected && root.batteryLevel > 0) {
-                    ctx.save();
-                    ctx.clip();
+                    ctx.save(); ctx.clip();
                     var fillHeight = (root.batteryLevel / 100.0) * 42 * sy;
                     ctx.fillStyle = getBatteryColor();
-                    ctx.fillRect(20 * sx, (52 * sy) - fillHeight, 24 * sx, fillHeight);
+                    ctx.fillRect(20*sx, (52*sy)-fillHeight, 24*sx, fillHeight);
                     ctx.restore();
                 }
 
-                ctx.strokeStyle = "#787878";
-                ctx.lineWidth = 1.5;
-                ctx.stroke();
+                ctx.strokeStyle = "#787878"; ctx.lineWidth = 1.5; ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(32*sx, 8*sy); ctx.lineTo(32*sx, 28*sy);
+                ctx.strokeStyle = "#5a5a5a"; ctx.lineWidth = 1; ctx.stroke();
+                ctx.fillStyle = "#323232"; ctx.strokeStyle = "#8c8c8c"; ctx.lineWidth = 1;
+                ctx.beginPath(); ctx.roundRect(29*sx, 14*sy, 6*sx, 10*sy, 2);
+                ctx.fill(); ctx.stroke();
 
-                // Divider
-                ctx.beginPath();
-                ctx.moveTo(32 * sx, 8 * sy);
-                ctx.lineTo(32 * sx, 28 * sy);
-                ctx.strokeStyle = "#5a5a5a";
-                ctx.lineWidth = 1;
-                ctx.stroke();
-
-                // Scroll wheel
-                ctx.fillStyle = "#323232";
-                ctx.strokeStyle = "#8c8c8c";
-                ctx.lineWidth = 1;
-                ctx.beginPath();
-                ctx.roundRect(29 * sx, 14 * sy, 6 * sx, 10 * sy, 2);
-                ctx.fill();
-                ctx.stroke();
-
-                // Text or charging bolt
-                ctx.fillStyle = "#ffffff";
-                ctx.textAlign = "center";
-                ctx.textBaseline = "middle";
-
+                ctx.fillStyle = "#ffffff"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
                 if (!root.connected || root.batteryLevel < 0) {
-                    ctx.font = "bold " + (14 * sy) + "px sans-serif";
-                    ctx.fillText("?", 32 * sx, 40 * sy);
+                    ctx.font = "bold " + (14*sy) + "px sans-serif";
+                    ctx.fillText("?", 32*sx, 40*sy);
                 } else if (root.isCharging) {
-                    // Lightning bolt
                     ctx.beginPath();
-                    ctx.moveTo(36 * sx, 32 * sy);
-                    ctx.lineTo(30 * sx, 42 * sy);
-                    ctx.lineTo(33 * sx, 42 * sy);
-                    ctx.lineTo(28 * sx, 54 * sy);
-                    ctx.lineTo(38 * sx, 42 * sy);
-                    ctx.lineTo(35 * sx, 42 * sy);
-                    ctx.lineTo(40 * sx, 32 * sy);
-                    ctx.closePath();
-                    ctx.fillStyle = "#ffdc32";
-                    ctx.fill();
+                    ctx.moveTo(36*sx, 32*sy); ctx.lineTo(30*sx, 42*sy);
+                    ctx.lineTo(33*sx, 42*sy); ctx.lineTo(28*sx, 54*sy);
+                    ctx.lineTo(38*sx, 42*sy); ctx.lineTo(35*sx, 42*sy);
+                    ctx.lineTo(40*sx, 32*sy); ctx.closePath();
+                    ctx.fillStyle = "#ffdc32"; ctx.fill();
                 } else {
                     var text = root.batteryLevel.toString();
                     var fontSize = text.length <= 2 ? 10 : 8;
-                    ctx.font = "bold " + (fontSize * sy) + "px sans-serif";
-                    ctx.fillText(text, 32 * sx, 44 * sy);
+                    ctx.font = "bold " + (fontSize*sy) + "px sans-serif";
+                    ctx.fillText(text, 32*sx, 44*sy);
                 }
             }
 
@@ -257,7 +244,7 @@ PlasmoidItem {
         }
     }
 
-    // Full representation - tabbed panel
+    // Full representation
     fullRepresentation: PlasmaExtras.Representation {
         Layout.minimumWidth: Kirigami.Units.gridUnit * 20
         Layout.minimumHeight: Kirigami.Units.gridUnit * 18
@@ -267,13 +254,11 @@ PlasmoidItem {
         header: PlasmaExtras.PlasmoidHeading {
             RowLayout {
                 anchors.fill: parent
-
                 PlasmaExtras.Heading {
                     level: 1
                     text: "HyperX Pulsefire Dart"
                     Layout.fillWidth: true
                 }
-
                 PlasmaComponents.ToolButton {
                     icon.name: "view-refresh"
                     onClicked: refresh()
@@ -294,13 +279,12 @@ PlasmoidItem {
 
                 Repeater {
                     model: [
-                        {id: "info", label: "Info", icon: "dialog-information"},
-                        {id: "dpi", label: "DPI", icon: "speedometer"},
-                        {id: "led", label: "LED", icon: "preferences-desktop-color"},
-                        {id: "buttons", label: "Buttons", icon: "input-mouse"},
-                        {id: "settings", label: "Settings", icon: "configure"}
+                        {id: "info", label: "Info"},
+                        {id: "dpi", label: "DPI"},
+                        {id: "led", label: "LED"},
+                        {id: "buttons", label: "Buttons"},
+                        {id: "settings", label: "Settings"}
                     ]
-
                     PlasmaComponents.TabButton {
                         Layout.fillWidth: true
                         text: modelData.label
@@ -314,63 +298,38 @@ PlasmoidItem {
             StackLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                currentIndex: {
-                    switch(root.currentTab) {
-                        case "info": return 0
-                        case "dpi": return 1
-                        case "led": return 2
-                        case "buttons": return 3
-                        case "settings": return 4
-                        default: return 0
-                    }
-                }
+                currentIndex: ["info", "dpi", "led", "buttons", "settings"].indexOf(root.currentTab)
 
-                // Info Tab
                 InfoTab {}
-
-                // DPI Tab
                 DpiTab {}
-
-                // LED Tab
                 LedTab {}
-
-                // Buttons Tab
                 ButtonsTab {}
-
-                // Settings Tab
                 SettingsTab {}
             }
         }
     }
 
-    // Info Tab Component
+    // Info Tab
     component InfoTab: QQC2.ScrollView {
         ColumnLayout {
             width: parent.width
             spacing: Kirigami.Units.largeSpacing
 
-            // Battery Status Section
-            PlasmaExtras.Heading {
-                level: 4
-                text: "Battery Status"
-            }
+            PlasmaExtras.Heading { level: 4; text: "Battery Status" }
 
             RowLayout {
                 Layout.fillWidth: true
                 spacing: Kirigami.Units.largeSpacing
 
-                // Mouse icon
                 Canvas {
                     id: infoMouseCanvas
                     Layout.preferredWidth: Kirigami.Units.gridUnit * 4
                     Layout.preferredHeight: Kirigami.Units.gridUnit * 5
-
                     onPaint: {
                         var ctx = getContext("2d");
                         var w = width; var h = height;
                         ctx.clearRect(0, 0, w, h);
                         var sx = w / 64; var sy = h / 64;
-
                         ctx.beginPath();
                         ctx.moveTo(16*sx, 14*sy); ctx.lineTo(16*sx, 52*sy);
                         ctx.quadraticCurveTo(16*sx, 58*sy, 22*sx, 58*sy);
@@ -381,7 +340,6 @@ PlasmoidItem {
                         ctx.quadraticCurveTo(16*sx, 6*sy, 16*sx, 14*sy);
                         ctx.closePath();
                         ctx.fillStyle = "#3c3c3c"; ctx.fill();
-
                         if (root.connected && root.batteryLevel > 0) {
                             ctx.save(); ctx.clip();
                             var fh = (root.batteryLevel / 100.0) * 42 * sy;
@@ -395,7 +353,6 @@ PlasmoidItem {
                         ctx.fillStyle = "#323232"; ctx.strokeStyle = "#8c8c8c";
                         ctx.beginPath(); ctx.roundRect(29*sx, 14*sy, 6*sx, 10*sy, 2);
                         ctx.fill(); ctx.stroke();
-
                         if (root.isCharging) {
                             ctx.beginPath();
                             ctx.moveTo(36*sx, 32*sy); ctx.lineTo(30*sx, 42*sy);
@@ -416,21 +373,17 @@ PlasmoidItem {
                 ColumnLayout {
                     Layout.fillWidth: true
                     spacing: Kirigami.Units.smallSpacing
-
                     PlasmaComponents.Label {
                         text: root.connected ? (root.batteryLevel >= 0 ? root.batteryLevel + "%" : "Unknown") : "Not Connected"
                         font.pixelSize: Kirigami.Theme.defaultFont.pixelSize * 2
                         font.bold: true
                         color: root.connected ? getBatteryColor() : Kirigami.Theme.disabledTextColor
                     }
-
                     PlasmaComponents.Label {
                         visible: root.connected
                         text: root.isCharging ? "Charging" : "Discharging"
                         color: root.isCharging ? "#54b4ff" : Kirigami.Theme.textColor
                     }
-
-                    // Battery bar
                     Rectangle {
                         Layout.fillWidth: true
                         height: Kirigami.Units.gridUnit * 0.4
@@ -439,7 +392,6 @@ PlasmoidItem {
                         border.color: Kirigami.Theme.disabledTextColor
                         border.width: 1
                         visible: root.connected
-
                         Rectangle {
                             anchors { left: parent.left; top: parent.top; bottom: parent.bottom; margins: 2 }
                             width: Math.max(0, (parent.width - 4) * (root.batteryLevel >= 0 ? root.batteryLevel / 100 : 0))
@@ -453,11 +405,7 @@ PlasmoidItem {
 
             Rectangle { Layout.fillWidth: true; height: 1; color: Kirigami.Theme.disabledTextColor; opacity: 0.3 }
 
-            // Device Information Section
-            PlasmaExtras.Heading {
-                level: 4
-                text: "Device Information"
-            }
+            PlasmaExtras.Heading { level: 4; text: "Device Information" }
 
             GridLayout {
                 Layout.fillWidth: true
@@ -467,16 +415,12 @@ PlasmoidItem {
 
                 PlasmaComponents.Label { text: "Firmware:"; opacity: 0.7 }
                 PlasmaComponents.Label { text: root.connected ? root.firmware || "---" : "---" }
-
                 PlasmaComponents.Label { text: "Device Name:"; opacity: 0.7 }
                 PlasmaComponents.Label { text: root.connected ? root.deviceName || "---" : "---" }
-
                 PlasmaComponents.Label { text: "Vendor ID:"; opacity: 0.7 }
                 PlasmaComponents.Label { text: root.connected ? root.vendorId || "---" : "---" }
-
                 PlasmaComponents.Label { text: "Product ID:"; opacity: 0.7 }
                 PlasmaComponents.Label { text: root.connected ? root.productId || "---" : "---" }
-
                 PlasmaComponents.Label { text: "Connection:"; opacity: 0.7 }
                 PlasmaComponents.Label { text: root.connected ? (root.connectionMode.charAt(0).toUpperCase() + root.connectionMode.slice(1)) : "Disconnected" }
             }
@@ -485,21 +429,25 @@ PlasmoidItem {
         }
     }
 
-    // DPI Tab Component
+    // DPI Tab - Clickable profiles
     component DpiTab: QQC2.ScrollView {
         ColumnLayout {
             width: parent.width
             spacing: Kirigami.Units.largeSpacing
 
-            PlasmaExtras.Heading {
-                level: 4
-                text: "DPI Profiles"
-            }
+            PlasmaExtras.Heading { level: 4; text: "DPI Profiles" }
 
             PlasmaComponents.Label {
                 visible: !root.connected
                 text: "Connect mouse to view DPI settings"
                 opacity: 0.7
+            }
+
+            PlasmaComponents.Label {
+                visible: root.connected
+                text: "Click a profile to activate it"
+                font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+                opacity: 0.6
             }
 
             Repeater {
@@ -509,10 +457,23 @@ PlasmoidItem {
                     Layout.fillWidth: true
                     height: Kirigami.Units.gridUnit * 2.5
                     radius: 4
-                    color: modelData.active ? Kirigami.Theme.highlightColor : (modelData.enabled ? Kirigami.Theme.backgroundColor : "transparent")
-                    opacity: modelData.enabled ? 1.0 : 0.5
+                    color: modelData.active ? Kirigami.Theme.highlightColor : (hovered ? Qt.rgba(1,1,1,0.1) : "transparent")
                     border.color: modelData.active ? Kirigami.Theme.highlightColor : Kirigami.Theme.disabledTextColor
                     border.width: modelData.active ? 2 : 1
+                    property bool hovered: false
+
+                    MouseArea {
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onEntered: parent.hovered = true
+                        onExited: parent.hovered = false
+                        onClicked: {
+                            if (!modelData.active) {
+                                setDpiProfile(modelData.index)
+                            }
+                        }
+                        cursorShape: modelData.active ? Qt.ArrowCursor : Qt.PointingHandCursor
+                    }
 
                     RowLayout {
                         anchors.fill: parent
@@ -551,16 +512,13 @@ PlasmoidItem {
         }
     }
 
-    // LED Tab Component
+    // LED Tab - With color picker
     component LedTab: QQC2.ScrollView {
         ColumnLayout {
             width: parent.width
             spacing: Kirigami.Units.largeSpacing
 
-            PlasmaExtras.Heading {
-                level: 4
-                text: "LED Settings"
-            }
+            PlasmaExtras.Heading { level: 4; text: "LED Settings" }
 
             PlasmaComponents.Label {
                 visible: !root.connected
@@ -576,49 +534,106 @@ PlasmoidItem {
                 visible: root.connected
 
                 PlasmaComponents.Label { text: "Effect:"; opacity: 0.7 }
-                PlasmaComponents.Label { text: root.ledEffect || "---" }
+                PlasmaComponents.Label { text: root.ledEffect || "Static" }
 
                 PlasmaComponents.Label { text: "Target:"; opacity: 0.7 }
-                PlasmaComponents.Label { text: root.ledTarget || "---" }
+                PlasmaComponents.Label { text: root.ledTarget || "Both" }
 
                 PlasmaComponents.Label { text: "Color:"; opacity: 0.7 }
                 RowLayout {
                     spacing: Kirigami.Units.smallSpacing
                     Rectangle {
-                        width: Kirigami.Units.gridUnit * 1.5
-                        height: Kirigami.Units.gridUnit
-                        radius: 2
+                        width: Kirigami.Units.gridUnit * 2
+                        height: Kirigami.Units.gridUnit * 1.5
+                        radius: 4
                         color: root.ledColor
                         border.color: Kirigami.Theme.disabledTextColor
                         border.width: 1
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.showColorPicker = !root.showColorPicker
+                        }
                     }
                     PlasmaComponents.Label { text: root.ledColor }
+                    PlasmaComponents.Label {
+                        text: "(click to change)"
+                        font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+                        opacity: 0.6
+                    }
                 }
 
                 PlasmaComponents.Label { text: "Brightness:"; opacity: 0.7 }
                 PlasmaComponents.Label { text: root.ledBrightness + "%" }
+            }
 
-                PlasmaComponents.Label { text: "Speed:"; opacity: 0.7 }
-                PlasmaComponents.Label { text: root.ledSpeed + "%" }
+            // Color picker grid
+            Rectangle {
+                Layout.fillWidth: true
+                height: colorGrid.height + Kirigami.Units.largeSpacing * 2
+                radius: 4
+                color: Qt.rgba(0,0,0,0.2)
+                visible: root.connected && root.showColorPicker
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: Kirigami.Units.smallSpacing
+                    spacing: Kirigami.Units.smallSpacing
+
+                    PlasmaComponents.Label {
+                        text: "Select Color:"
+                        font.bold: true
+                    }
+
+                    GridLayout {
+                        id: colorGrid
+                        columns: 8
+                        rowSpacing: 4
+                        columnSpacing: 4
+
+                        Repeater {
+                            model: [
+                                "#FF0000", "#FF7F00", "#FFFF00", "#00FF00", "#00FFFF", "#0000FF", "#8B00FF", "#FF00FF",
+                                "#FF6666", "#FFB366", "#FFFF66", "#66FF66", "#66FFFF", "#6666FF", "#B366FF", "#FF66FF",
+                                "#FFFFFF", "#CCCCCC", "#999999", "#666666", "#333333", "#000000", "#FF1493", "#00CED1"
+                            ]
+                            Rectangle {
+                                width: Kirigami.Units.gridUnit * 1.5
+                                height: Kirigami.Units.gridUnit * 1.5
+                                radius: 2
+                                color: modelData
+                                border.color: root.ledColor === modelData ? Kirigami.Theme.highlightColor : Kirigami.Theme.disabledTextColor
+                                border.width: root.ledColor === modelData ? 2 : 1
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        setLedColor(modelData)
+                                        root.showColorPicker = false
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             Item { Layout.fillHeight: true }
         }
     }
 
-    // Buttons Tab Component
+    // Buttons Tab
     component ButtonsTab: QQC2.ScrollView {
         ColumnLayout {
             width: parent.width
             spacing: Kirigami.Units.largeSpacing
 
-            PlasmaExtras.Heading {
-                level: 4
-                text: "Button Mappings"
-            }
+            PlasmaExtras.Heading { level: 4; text: "Button Mappings" }
 
             PlasmaComponents.Label {
-                text: "Button configuration requires the full configuration panel."
+                text: "Button remapping requires the full configuration panel."
                 wrapMode: Text.WordWrap
                 opacity: 0.7
             }
@@ -633,19 +648,16 @@ PlasmoidItem {
         }
     }
 
-    // Settings Tab Component
+    // Settings Tab
     component SettingsTab: QQC2.ScrollView {
         ColumnLayout {
             width: parent.width
             spacing: Kirigami.Units.largeSpacing
 
-            PlasmaExtras.Heading {
-                level: 4
-                text: "Settings"
-            }
+            PlasmaExtras.Heading { level: 4; text: "Settings" }
 
             PlasmaComponents.Label {
-                text: "Polling rate, battery alerts, and other settings require the full configuration panel."
+                text: "Polling rate, macros, and advanced settings require the full configuration panel."
                 wrapMode: Text.WordWrap
                 opacity: 0.7
             }
