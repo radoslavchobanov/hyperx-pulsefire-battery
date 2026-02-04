@@ -56,6 +56,20 @@ def find_device():
     return None, None
 
 
+def drain_buffer(dev):
+    """Drain any stale data from the HID buffer."""
+    dev.set_nonblocking(True)
+    try:
+        while True:
+            data = dev.read(PACKET_SIZE, timeout_ms=50)
+            if not data:
+                break
+    except Exception:
+        pass
+    finally:
+        dev.set_nonblocking(False)
+
+
 def send_command(dev, data, retries=3):
     """Send a command packet and read response with retries."""
     packet = [0x00] * PACKET_SIZE
@@ -64,12 +78,23 @@ def send_command(dev, data, retries=3):
         if i + 1 < PACKET_SIZE:
             packet[i + 1] = byte
 
+    expected_cmd = data[0] if data else None
+
     for attempt in range(retries):
         try:
             dev.write(packet)
+            time.sleep(0.05)
             response = dev.read(PACKET_SIZE, timeout_ms=1000)
             if response and len(response) > 0:
-                return response
+                # Verify response matches expected command
+                if expected_cmd is not None and response[0] == expected_cmd:
+                    return response
+                # If mismatch, try reading again (async response)
+                for _ in range(3):
+                    time.sleep(0.02)
+                    response = dev.read(PACKET_SIZE, timeout_ms=500)
+                    if response and response[0] == expected_cmd:
+                        return response
             time.sleep(0.05)
         except Exception:
             if attempt < retries - 1:
@@ -215,6 +240,8 @@ def cmd_read():
             "error": None
         }
 
+        # Drain any stale data from buffer
+        drain_buffer(dev)
         time.sleep(0.05)
 
         battery, charging = get_battery_status(dev)

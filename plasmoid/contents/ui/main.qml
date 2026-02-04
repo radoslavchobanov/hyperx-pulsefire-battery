@@ -6,7 +6,6 @@
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
-import QtQuick.Dialogs
 import org.kde.plasma.plasmoid
 import org.kde.plasma.components as PlasmaComponents
 import org.kde.plasma.extras as PlasmaExtras
@@ -94,10 +93,13 @@ PlasmoidItem {
 
         onNewData: (source, data) => {
             var stdout = data["stdout"]
-            disconnectSource(source)
+            var exitCode = data["exit code"]
 
-            if (!stdout || stdout.trim() === "") {
+            // Check for failed execution or empty output
+            if (exitCode !== 0 || !stdout || stdout.trim() === "") {
                 root.loading = false
+                root.connected = false
+                disconnectSource(source)
                 return
             }
 
@@ -110,6 +112,7 @@ PlasmoidItem {
                     if (result.success) {
                         Qt.callLater(refresh)
                     }
+                    disconnectSource(source)
                     return
                 }
 
@@ -119,6 +122,7 @@ PlasmoidItem {
                     root.connected = false
                     root.lastError = result.error
                     root.batteryLevel = -1
+                    disconnectSource(source)
                     return
                 }
 
@@ -153,6 +157,8 @@ PlasmoidItem {
                 root.lastError = "Parse error"
                 root.loading = false
             }
+
+            disconnectSource(source)
         }
     }
 
@@ -310,8 +316,12 @@ PlasmoidItem {
     }
 
     // Info Tab
-    component InfoTab: QQC2.ScrollView {
+    component InfoTab: Flickable {
+        contentHeight: infoContent.height
+        clip: true
+
         ColumnLayout {
+            id: infoContent
             width: parent.width
             spacing: Kirigami.Units.largeSpacing
 
@@ -430,8 +440,12 @@ PlasmoidItem {
     }
 
     // DPI Tab - Clickable profiles
-    component DpiTab: QQC2.ScrollView {
+    component DpiTab: Flickable {
+        contentHeight: dpiContent.height
+        clip: true
+
         ColumnLayout {
+            id: dpiContent
             width: parent.width
             spacing: Kirigami.Units.largeSpacing
 
@@ -513,8 +527,12 @@ PlasmoidItem {
     }
 
     // LED Tab - With color picker
-    component LedTab: QQC2.ScrollView {
+    component LedTab: Flickable {
+        contentHeight: ledContent.height
+        clip: true
+
         ColumnLayout {
+            id: ledContent
             width: parent.width
             spacing: Kirigami.Units.largeSpacing
 
@@ -625,8 +643,12 @@ PlasmoidItem {
     }
 
     // Buttons Tab
-    component ButtonsTab: QQC2.ScrollView {
+    component ButtonsTab: Flickable {
+        contentHeight: buttonsContent.height
+        clip: true
+
         ColumnLayout {
+            id: buttonsContent
             width: parent.width
             spacing: Kirigami.Units.largeSpacing
 
@@ -649,8 +671,12 @@ PlasmoidItem {
     }
 
     // Settings Tab
-    component SettingsTab: QQC2.ScrollView {
+    component SettingsTab: Flickable {
+        contentHeight: settingsContent.height
+        clip: true
+
         ColumnLayout {
+            id: settingsContent
             width: parent.width
             spacing: Kirigami.Units.largeSpacing
 
