@@ -14,6 +14,7 @@ import org.kde.kirigami as Kirigami
 PlasmoidItem {
     id: root
 
+    // Device data
     property int batteryLevel: -1
     property bool isCharging: false
     property string connectionMode: ""
@@ -21,12 +22,31 @@ PlasmoidItem {
     property bool loading: true
     property string lastError: ""
 
+    // Hardware info
+    property string firmware: ""
+    property string deviceName: ""
+    property string vendorId: ""
+    property string productId: ""
+
+    // DPI settings
+    property var dpiProfiles: []
+    property int activeDpiProfile: 0
+
+    // LED settings
+    property string ledEffect: ""
+    property string ledTarget: ""
+    property string ledColor: "#000000"
+    property int ledBrightness: 0
+    property int ledSpeed: 0
+
+    property string currentTab: "info"
+
     Plasmoid.icon: Qt.resolvedUrl("../icons/mouse-battery.svg")
     toolTipMainText: "PlasmaNGenuity"
     toolTipSubText: getTooltipText()
 
-    switchWidth: Kirigami.Units.gridUnit * 10
-    switchHeight: Kirigami.Units.gridUnit * 8
+    switchWidth: Kirigami.Units.gridUnit * 14
+    switchHeight: Kirigami.Units.gridUnit * 16
 
     readonly property string backendPath: Qt.resolvedUrl("../code/backend.py").toString().replace("file://", "")
 
@@ -41,11 +61,11 @@ PlasmoidItem {
 
     function getBatteryColor() {
         if (!connected || batteryLevel < 0) return Kirigami.Theme.disabledTextColor
-        if (isCharging) return "#54b4ff"  // Blue for charging
-        if (batteryLevel <= 10) return "#ff3c3c"  // Red
-        if (batteryLevel <= 25) return "#ffa500"  // Orange
-        if (batteryLevel <= 50) return "#ffff00"  // Yellow
-        return "#50c850"  // Green
+        if (isCharging) return "#54b4ff"
+        if (batteryLevel <= 10) return "#ff3c3c"
+        if (batteryLevel <= 25) return "#ffa500"
+        if (batteryLevel <= 50) return "#ffff00"
+        return "#50c850"
     }
 
     function refresh() {
@@ -85,6 +105,29 @@ PlasmoidItem {
                 root.connectionMode = result.mode || ""
                 root.lastError = ""
 
+                // Hardware info
+                if (result.hw_info) {
+                    root.firmware = result.hw_info.firmware || ""
+                    root.deviceName = result.hw_info.device_name || ""
+                    root.vendorId = result.hw_info.vendor_id || ""
+                    root.productId = result.hw_info.product_id || ""
+                }
+
+                // DPI settings
+                if (result.dpi) {
+                    root.dpiProfiles = result.dpi.profiles || []
+                    root.activeDpiProfile = result.dpi.active_profile || 0
+                }
+
+                // LED settings
+                if (result.led) {
+                    root.ledEffect = result.led.effect || ""
+                    root.ledTarget = result.led.target || ""
+                    root.ledColor = result.led.color || "#000000"
+                    root.ledBrightness = result.led.brightness || 0
+                    root.ledSpeed = result.led.speed || 0
+                }
+
             } catch (e) {
                 root.connected = false
                 root.lastError = "Parse error"
@@ -100,25 +143,25 @@ PlasmoidItem {
         onTriggered: refresh()
     }
 
-    // Compact representation - mouse icon with battery fill
+    // Compact representation - square mouse icon with battery fill
     compactRepresentation: Item {
         id: compactRoot
 
         Layout.minimumWidth: Kirigami.Units.iconSizes.medium
         Layout.minimumHeight: Kirigami.Units.iconSizes.medium
-        Layout.preferredWidth: Layout.minimumWidth
-        Layout.preferredHeight: Layout.minimumHeight
+        Layout.preferredWidth: Kirigami.Units.iconSizes.medium
+        Layout.preferredHeight: Kirigami.Units.iconSizes.medium
 
         MouseArea {
             anchors.fill: parent
             onClicked: root.expanded = !root.expanded
         }
 
-        // Mouse silhouette with battery fill
         Canvas {
             id: mouseCanvas
-            anchors.fill: parent
-            anchors.margins: 2
+            anchors.centerIn: parent
+            width: Math.min(parent.width, parent.height)
+            height: width
 
             onPaint: {
                 var ctx = getContext("2d");
@@ -126,11 +169,10 @@ PlasmoidItem {
                 var h = height;
                 ctx.clearRect(0, 0, w, h);
 
-                // Scale factors
                 var sx = w / 64;
                 var sy = h / 64;
 
-                // Mouse body path
+                // Mouse body
                 ctx.beginPath();
                 ctx.moveTo(16 * sx, 14 * sy);
                 ctx.lineTo(16 * sx, 52 * sy);
@@ -142,7 +184,6 @@ PlasmoidItem {
                 ctx.quadraticCurveTo(16 * sx, 6 * sy, 16 * sx, 14 * sy);
                 ctx.closePath();
 
-                // Body fill (dark)
                 ctx.fillStyle = "#3c3c3c";
                 ctx.fill();
 
@@ -156,12 +197,11 @@ PlasmoidItem {
                     ctx.restore();
                 }
 
-                // Outline
                 ctx.strokeStyle = "#787878";
                 ctx.lineWidth = 1.5;
                 ctx.stroke();
 
-                // Divider line
+                // Divider
                 ctx.beginPath();
                 ctx.moveTo(32 * sx, 8 * sy);
                 ctx.lineTo(32 * sx, 28 * sy);
@@ -178,23 +218,16 @@ PlasmoidItem {
                 ctx.fill();
                 ctx.stroke();
 
-                // Percentage text or question mark
+                // Text or charging bolt
                 ctx.fillStyle = "#ffffff";
                 ctx.textAlign = "center";
                 ctx.textBaseline = "middle";
 
                 if (!root.connected || root.batteryLevel < 0) {
-                    ctx.font = "bold " + (16 * sy) + "px sans-serif";
-                    ctx.fillText("?", 32 * sx, 38 * sy);
-                } else if (!root.isCharging) {
-                    var text = root.batteryLevel.toString();
-                    var fontSize = text.length <= 2 ? 11 : 9;
-                    ctx.font = "bold " + (fontSize * sy) + "px sans-serif";
-                    ctx.fillText(text, 32 * sx, 42 * sy);
-                }
-
-                // Charging bolt
-                if (root.isCharging) {
+                    ctx.font = "bold " + (14 * sy) + "px sans-serif";
+                    ctx.fillText("?", 32 * sx, 40 * sy);
+                } else if (root.isCharging) {
+                    // Lightning bolt
                     ctx.beginPath();
                     ctx.moveTo(36 * sx, 32 * sy);
                     ctx.lineTo(30 * sx, 42 * sy);
@@ -206,9 +239,11 @@ PlasmoidItem {
                     ctx.closePath();
                     ctx.fillStyle = "#ffdc32";
                     ctx.fill();
-                    ctx.strokeStyle = "#ffc800";
-                    ctx.lineWidth = 1;
-                    ctx.stroke();
+                } else {
+                    var text = root.batteryLevel.toString();
+                    var fontSize = text.length <= 2 ? 10 : 8;
+                    ctx.font = "bold " + (fontSize * sy) + "px sans-serif";
+                    ctx.fillText(text, 32 * sx, 44 * sy);
                 }
             }
 
@@ -221,12 +256,12 @@ PlasmoidItem {
         }
     }
 
-    // Full representation - popup panel
+    // Full representation - tabbed panel
     fullRepresentation: PlasmaExtras.Representation {
-        Layout.minimumWidth: Kirigami.Units.gridUnit * 16
-        Layout.minimumHeight: Kirigami.Units.gridUnit * 12
-        Layout.preferredWidth: Kirigami.Units.gridUnit * 18
-        Layout.preferredHeight: contentLayout.implicitHeight + Kirigami.Units.largeSpacing * 2
+        Layout.minimumWidth: Kirigami.Units.gridUnit * 20
+        Layout.minimumHeight: Kirigami.Units.gridUnit * 18
+        Layout.preferredWidth: Kirigami.Units.gridUnit * 22
+        Layout.preferredHeight: Kirigami.Units.gridUnit * 22
 
         header: PlasmaExtras.PlasmoidHeading {
             RowLayout {
@@ -247,105 +282,136 @@ PlasmoidItem {
         }
 
         ColumnLayout {
-            id: contentLayout
             anchors.fill: parent
-            anchors.margins: Kirigami.Units.largeSpacing
+            anchors.margins: Kirigami.Units.smallSpacing
+            spacing: Kirigami.Units.smallSpacing
+
+            // Tab bar
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 2
+
+                Repeater {
+                    model: [
+                        {id: "info", label: "Info", icon: "dialog-information"},
+                        {id: "dpi", label: "DPI", icon: "speedometer"},
+                        {id: "led", label: "LED", icon: "preferences-desktop-color"},
+                        {id: "buttons", label: "Buttons", icon: "input-mouse"},
+                        {id: "settings", label: "Settings", icon: "configure"}
+                    ]
+
+                    PlasmaComponents.TabButton {
+                        Layout.fillWidth: true
+                        text: modelData.label
+                        checked: root.currentTab === modelData.id
+                        onClicked: root.currentTab = modelData.id
+                    }
+                }
+            }
+
+            // Tab content
+            StackLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                currentIndex: {
+                    switch(root.currentTab) {
+                        case "info": return 0
+                        case "dpi": return 1
+                        case "led": return 2
+                        case "buttons": return 3
+                        case "settings": return 4
+                        default: return 0
+                    }
+                }
+
+                // Info Tab
+                InfoTab {}
+
+                // DPI Tab
+                DpiTab {}
+
+                // LED Tab
+                LedTab {}
+
+                // Buttons Tab
+                ButtonsTab {}
+
+                // Settings Tab
+                SettingsTab {}
+            }
+        }
+    }
+
+    // Info Tab Component
+    component InfoTab: ScrollView {
+        ColumnLayout {
+            width: parent.width
             spacing: Kirigami.Units.largeSpacing
 
-            // Connection status section
+            // Battery Status Section
+            PlasmaExtras.Heading {
+                level: 4
+                text: "Battery Status"
+            }
+
             RowLayout {
                 Layout.fillWidth: true
                 spacing: Kirigami.Units.largeSpacing
 
-                // Mouse icon with battery
-                Rectangle {
-                    width: Kirigami.Units.gridUnit * 4
-                    height: Kirigami.Units.gridUnit * 5
-                    color: "transparent"
+                // Mouse icon
+                Canvas {
+                    id: infoMouseCanvas
+                    Layout.preferredWidth: Kirigami.Units.gridUnit * 4
+                    Layout.preferredHeight: Kirigami.Units.gridUnit * 5
 
-                    Canvas {
-                        id: panelMouseCanvas
-                        anchors.fill: parent
+                    onPaint: {
+                        var ctx = getContext("2d");
+                        var w = width; var h = height;
+                        ctx.clearRect(0, 0, w, h);
+                        var sx = w / 64; var sy = h / 64;
 
-                        onPaint: {
-                            var ctx = getContext("2d");
-                            var w = width;
-                            var h = height;
-                            ctx.clearRect(0, 0, w, h);
+                        ctx.beginPath();
+                        ctx.moveTo(16*sx, 14*sy); ctx.lineTo(16*sx, 52*sy);
+                        ctx.quadraticCurveTo(16*sx, 58*sy, 22*sx, 58*sy);
+                        ctx.lineTo(42*sx, 58*sy);
+                        ctx.quadraticCurveTo(48*sx, 58*sy, 48*sx, 52*sy);
+                        ctx.lineTo(48*sx, 14*sy);
+                        ctx.quadraticCurveTo(48*sx, 6*sy, 32*sx, 6*sy);
+                        ctx.quadraticCurveTo(16*sx, 6*sy, 16*sx, 14*sy);
+                        ctx.closePath();
+                        ctx.fillStyle = "#3c3c3c"; ctx.fill();
 
-                            var sx = w / 64;
-                            var sy = h / 64;
-
-                            // Mouse body
-                            ctx.beginPath();
-                            ctx.moveTo(16 * sx, 14 * sy);
-                            ctx.lineTo(16 * sx, 52 * sy);
-                            ctx.quadraticCurveTo(16 * sx, 58 * sy, 22 * sx, 58 * sy);
-                            ctx.lineTo(42 * sx, 58 * sy);
-                            ctx.quadraticCurveTo(48 * sx, 58 * sy, 48 * sx, 52 * sy);
-                            ctx.lineTo(48 * sx, 14 * sy);
-                            ctx.quadraticCurveTo(48 * sx, 6 * sy, 32 * sx, 6 * sy);
-                            ctx.quadraticCurveTo(16 * sx, 6 * sy, 16 * sx, 14 * sy);
-                            ctx.closePath();
-
-                            ctx.fillStyle = "#3c3c3c";
-                            ctx.fill();
-
-                            if (root.connected && root.batteryLevel > 0) {
-                                ctx.save();
-                                ctx.clip();
-                                var fillHeight = (root.batteryLevel / 100.0) * 42 * sy;
-                                ctx.fillStyle = getBatteryColor();
-                                ctx.fillRect(20 * sx, (52 * sy) - fillHeight, 24 * sx, fillHeight);
-                                ctx.restore();
-                            }
-
-                            ctx.strokeStyle = "#787878";
-                            ctx.lineWidth = 2;
-                            ctx.stroke();
-
-                            // Divider
-                            ctx.beginPath();
-                            ctx.moveTo(32 * sx, 8 * sy);
-                            ctx.lineTo(32 * sx, 28 * sy);
-                            ctx.strokeStyle = "#5a5a5a";
-                            ctx.lineWidth = 1;
-                            ctx.stroke();
-
-                            // Scroll wheel
-                            ctx.fillStyle = "#323232";
-                            ctx.strokeStyle = "#8c8c8c";
-                            ctx.beginPath();
-                            ctx.roundRect(29 * sx, 14 * sy, 6 * sx, 10 * sy, 2);
-                            ctx.fill();
-                            ctx.stroke();
-
-                            // Charging bolt
-                            if (root.isCharging) {
-                                ctx.beginPath();
-                                ctx.moveTo(36 * sx, 32 * sy);
-                                ctx.lineTo(30 * sx, 42 * sy);
-                                ctx.lineTo(33 * sx, 42 * sy);
-                                ctx.lineTo(28 * sx, 54 * sy);
-                                ctx.lineTo(38 * sx, 42 * sy);
-                                ctx.lineTo(35 * sx, 42 * sy);
-                                ctx.lineTo(40 * sx, 32 * sy);
-                                ctx.closePath();
-                                ctx.fillStyle = "#ffdc32";
-                                ctx.fill();
-                            }
+                        if (root.connected && root.batteryLevel > 0) {
+                            ctx.save(); ctx.clip();
+                            var fh = (root.batteryLevel / 100.0) * 42 * sy;
+                            ctx.fillStyle = getBatteryColor();
+                            ctx.fillRect(20*sx, (52*sy)-fh, 24*sx, fh);
+                            ctx.restore();
                         }
+                        ctx.strokeStyle = "#787878"; ctx.lineWidth = 2; ctx.stroke();
+                        ctx.beginPath(); ctx.moveTo(32*sx, 8*sy); ctx.lineTo(32*sx, 28*sy);
+                        ctx.strokeStyle = "#5a5a5a"; ctx.lineWidth = 1; ctx.stroke();
+                        ctx.fillStyle = "#323232"; ctx.strokeStyle = "#8c8c8c";
+                        ctx.beginPath(); ctx.roundRect(29*sx, 14*sy, 6*sx, 10*sy, 2);
+                        ctx.fill(); ctx.stroke();
 
-                        Connections {
-                            target: root
-                            function onBatteryLevelChanged() { panelMouseCanvas.requestPaint() }
-                            function onIsChargingChanged() { panelMouseCanvas.requestPaint() }
-                            function onConnectedChanged() { panelMouseCanvas.requestPaint() }
+                        if (root.isCharging) {
+                            ctx.beginPath();
+                            ctx.moveTo(36*sx, 32*sy); ctx.lineTo(30*sx, 42*sy);
+                            ctx.lineTo(33*sx, 42*sy); ctx.lineTo(28*sx, 54*sy);
+                            ctx.lineTo(38*sx, 42*sy); ctx.lineTo(35*sx, 42*sy);
+                            ctx.lineTo(40*sx, 32*sy); ctx.closePath();
+                            ctx.fillStyle = "#ffdc32"; ctx.fill();
                         }
+                    }
+                    Connections {
+                        target: root
+                        function onBatteryLevelChanged() { infoMouseCanvas.requestPaint() }
+                        function onIsChargingChanged() { infoMouseCanvas.requestPaint() }
+                        function onConnectedChanged() { infoMouseCanvas.requestPaint() }
                     }
                 }
 
-                // Status info
                 ColumnLayout {
                     Layout.fillWidth: true
                     spacing: Kirigami.Units.smallSpacing
@@ -358,123 +424,238 @@ PlasmoidItem {
                     }
 
                     PlasmaComponents.Label {
-                        visible: root.connected && root.isCharging
-                        text: "Charging"
-                        color: "#54b4ff"
+                        visible: root.connected
+                        text: root.isCharging ? "Charging" : "Discharging"
+                        color: root.isCharging ? "#54b4ff" : Kirigami.Theme.textColor
                     }
 
-                    PlasmaComponents.Label {
-                        visible: root.connected && root.connectionMode
-                        text: root.connectionMode.charAt(0).toUpperCase() + root.connectionMode.slice(1) + " mode"
-                        opacity: 0.7
-                    }
+                    // Battery bar
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: Kirigami.Units.gridUnit * 0.4
+                        radius: height / 2
+                        color: Kirigami.Theme.backgroundColor
+                        border.color: Kirigami.Theme.disabledTextColor
+                        border.width: 1
+                        visible: root.connected
 
-                    PlasmaComponents.Label {
-                        visible: !root.connected
-                        text: root.lastError || "Mouse not detected"
-                        font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                        opacity: 0.7
+                        Rectangle {
+                            anchors { left: parent.left; top: parent.top; bottom: parent.bottom; margins: 2 }
+                            width: Math.max(0, (parent.width - 4) * (root.batteryLevel >= 0 ? root.batteryLevel / 100 : 0))
+                            radius: height / 2
+                            color: getBatteryColor()
+                            Behavior on width { NumberAnimation { duration: 300 } }
+                        }
                     }
                 }
             }
 
-            // Separator
-            Rectangle {
-                Layout.fillWidth: true
-                height: 1
-                color: Kirigami.Theme.disabledTextColor
-                opacity: 0.3
+            Rectangle { Layout.fillWidth: true; height: 1; color: Kirigami.Theme.disabledTextColor; opacity: 0.3 }
+
+            // Device Information Section
+            PlasmaExtras.Heading {
+                level: 4
+                text: "Device Information"
             }
 
-            // Battery bar
-            ColumnLayout {
+            GridLayout {
                 Layout.fillWidth: true
-                spacing: Kirigami.Units.smallSpacing
-                visible: root.connected
+                columns: 2
+                columnSpacing: Kirigami.Units.largeSpacing
+                rowSpacing: Kirigami.Units.smallSpacing
 
-                RowLayout {
-                    Layout.fillWidth: true
+                PlasmaComponents.Label { text: "Firmware:"; opacity: 0.7 }
+                PlasmaComponents.Label { text: root.connected ? root.firmware || "---" : "---" }
 
-                    PlasmaComponents.Label {
-                        text: "Battery Level"
-                        font.bold: true
-                    }
+                PlasmaComponents.Label { text: "Device Name:"; opacity: 0.7 }
+                PlasmaComponents.Label { text: root.connected ? root.deviceName || "---" : "---" }
 
-                    Item { Layout.fillWidth: true }
+                PlasmaComponents.Label { text: "Vendor ID:"; opacity: 0.7 }
+                PlasmaComponents.Label { text: root.connected ? root.vendorId || "---" : "---" }
 
-                    PlasmaComponents.Label {
-                        text: root.batteryLevel >= 0 ? root.batteryLevel + "%" : "—"
-                        color: getBatteryColor()
-                    }
-                }
+                PlasmaComponents.Label { text: "Product ID:"; opacity: 0.7 }
+                PlasmaComponents.Label { text: root.connected ? root.productId || "---" : "---" }
 
-                // Progress bar
+                PlasmaComponents.Label { text: "Connection:"; opacity: 0.7 }
+                PlasmaComponents.Label { text: root.connected ? (root.connectionMode.charAt(0).toUpperCase() + root.connectionMode.slice(1)) : "Disconnected" }
+            }
+
+            Item { Layout.fillHeight: true }
+        }
+    }
+
+    // DPI Tab Component
+    component DpiTab: ScrollView {
+        ColumnLayout {
+            width: parent.width
+            spacing: Kirigami.Units.largeSpacing
+
+            PlasmaExtras.Heading {
+                level: 4
+                text: "DPI Profiles"
+            }
+
+            PlasmaComponents.Label {
+                visible: !root.connected
+                text: "Connect mouse to view DPI settings"
+                opacity: 0.7
+            }
+
+            Repeater {
+                model: root.dpiProfiles
+
                 Rectangle {
                     Layout.fillWidth: true
-                    height: Kirigami.Units.gridUnit * 0.5
-                    radius: height / 2
-                    color: Kirigami.Theme.backgroundColor
-                    border.color: Kirigami.Theme.disabledTextColor
-                    border.width: 1
-                    opacity: 0.5
+                    height: Kirigami.Units.gridUnit * 2.5
+                    radius: 4
+                    color: modelData.active ? Kirigami.Theme.highlightColor : (modelData.enabled ? Kirigami.Theme.backgroundColor : "transparent")
+                    opacity: modelData.enabled ? 1.0 : 0.5
+                    border.color: modelData.active ? Kirigami.Theme.highlightColor : Kirigami.Theme.disabledTextColor
+                    border.width: modelData.active ? 2 : 1
 
-                    Rectangle {
-                        anchors {
-                            left: parent.left
-                            top: parent.top
-                            bottom: parent.bottom
-                            margins: 2
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.margins: Kirigami.Units.smallSpacing
+                        spacing: Kirigami.Units.smallSpacing
+
+                        Rectangle {
+                            width: Kirigami.Units.gridUnit
+                            height: Kirigami.Units.gridUnit
+                            radius: 2
+                            color: modelData.color
                         }
-                        width: Math.max(0, (parent.width - 4) * (root.batteryLevel >= 0 ? root.batteryLevel / 100 : 0))
-                        radius: height / 2
-                        color: getBatteryColor()
 
-                        Behavior on width {
-                            NumberAnimation { duration: 300; easing.type: Easing.OutQuad }
+                        PlasmaComponents.Label {
+                            text: "Profile " + modelData.index
+                            font.bold: modelData.active
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        PlasmaComponents.Label {
+                            text: modelData.dpi + " DPI"
+                            font.bold: true
+                        }
+
+                        PlasmaComponents.Label {
+                            visible: modelData.active
+                            text: "(Active)"
+                            color: Kirigami.Theme.positiveTextColor
                         }
                     }
-                }
-            }
-
-            // Not connected help
-            ColumnLayout {
-                Layout.fillWidth: true
-                visible: !root.connected
-                spacing: Kirigami.Units.smallSpacing
-
-                PlasmaComponents.Label {
-                    Layout.fillWidth: true
-                    text: "Make sure the wireless dongle is plugged in, or connect via USB cable."
-                    wrapMode: Text.WordWrap
-                    font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                    opacity: 0.6
                 }
             }
 
             Item { Layout.fillHeight: true }
+        }
+    }
 
-            // Action buttons
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: Kirigami.Units.smallSpacing
+    // LED Tab Component
+    component LedTab: ScrollView {
+        ColumnLayout {
+            width: parent.width
+            spacing: Kirigami.Units.largeSpacing
 
-                PlasmaComponents.Button {
-                    Layout.fillWidth: true
-                    text: "Configuration Panel"
-                    icon.name: "configure"
-                    visible: root.connected
-                    onClicked: {
-                        var proc = executable.connectSource("hyperx-battery-tray &")
-                    }
-                }
-
-                PlasmaComponents.Button {
-                    Layout.fillWidth: true
-                    text: "Refresh"
-                    icon.name: "view-refresh"
-                    onClicked: refresh()
-                }
+            PlasmaExtras.Heading {
+                level: 4
+                text: "LED Settings"
             }
+
+            PlasmaComponents.Label {
+                visible: !root.connected
+                text: "Connect mouse to view LED settings"
+                opacity: 0.7
+            }
+
+            GridLayout {
+                Layout.fillWidth: true
+                columns: 2
+                columnSpacing: Kirigami.Units.largeSpacing
+                rowSpacing: Kirigami.Units.smallSpacing
+                visible: root.connected
+
+                PlasmaComponents.Label { text: "Effect:"; opacity: 0.7 }
+                PlasmaComponents.Label { text: root.ledEffect || "---" }
+
+                PlasmaComponents.Label { text: "Target:"; opacity: 0.7 }
+                PlasmaComponents.Label { text: root.ledTarget || "---" }
+
+                PlasmaComponents.Label { text: "Color:"; opacity: 0.7 }
+                RowLayout {
+                    spacing: Kirigami.Units.smallSpacing
+                    Rectangle {
+                        width: Kirigami.Units.gridUnit * 1.5
+                        height: Kirigami.Units.gridUnit
+                        radius: 2
+                        color: root.ledColor
+                        border.color: Kirigami.Theme.disabledTextColor
+                        border.width: 1
+                    }
+                    PlasmaComponents.Label { text: root.ledColor }
+                }
+
+                PlasmaComponents.Label { text: "Brightness:"; opacity: 0.7 }
+                PlasmaComponents.Label { text: root.ledBrightness + "%" }
+
+                PlasmaComponents.Label { text: "Speed:"; opacity: 0.7 }
+                PlasmaComponents.Label { text: root.ledSpeed + "%" }
+            }
+
+            Item { Layout.fillHeight: true }
+        }
+    }
+
+    // Buttons Tab Component
+    component ButtonsTab: ScrollView {
+        ColumnLayout {
+            width: parent.width
+            spacing: Kirigami.Units.largeSpacing
+
+            PlasmaExtras.Heading {
+                level: 4
+                text: "Button Mappings"
+            }
+
+            PlasmaComponents.Label {
+                text: "Button configuration requires the full configuration panel."
+                wrapMode: Text.WordWrap
+                opacity: 0.7
+            }
+
+            PlasmaComponents.Button {
+                text: "Open Configuration Panel"
+                icon.name: "configure"
+                onClicked: executable.connectSource("hyperx-battery-tray &")
+            }
+
+            Item { Layout.fillHeight: true }
+        }
+    }
+
+    // Settings Tab Component
+    component SettingsTab: ScrollView {
+        ColumnLayout {
+            width: parent.width
+            spacing: Kirigami.Units.largeSpacing
+
+            PlasmaExtras.Heading {
+                level: 4
+                text: "Settings"
+            }
+
+            PlasmaComponents.Label {
+                text: "Polling rate, battery alerts, and other settings require the full configuration panel."
+                wrapMode: Text.WordWrap
+                opacity: 0.7
+            }
+
+            PlasmaComponents.Button {
+                text: "Open Configuration Panel"
+                icon.name: "configure"
+                onClicked: executable.connectSource("hyperx-battery-tray &")
+            }
+
+            Item { Layout.fillHeight: true }
         }
     }
 }
