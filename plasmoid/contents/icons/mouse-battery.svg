@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- Mouse body silhouette -->
+  <path d="M16 14 L16 52 Q16 58 22 58 L42 58 Q48 58 48 52 L48 14 Q48 6 32 6 Q16 6 16 14 Z"
+        fill="#3c3c3c" stroke="#787878" stroke-width="1.5"/>
+  <!-- Divider line between buttons -->
+  <line x1="32" y1="8" x2="32" y2="28" stroke="#5a5a5a" stroke-width="1"/>
+  <!-- Scroll wheel -->
+  <rect x="29" y="14" width="6" height="10" rx="2" ry="2" fill="#323232" stroke="#8c8c8c" stroke-width="1"/>
+</svg>
