@@ -47,18 +47,30 @@ VENDOR_ID_STR = "0951"
 def find_device() -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """Find the HyperX Pulsefire Dart HID device.
 
+    Prefers wired over wireless when both are present, since a wired
+    connection means the USB cable is plugged in (charging) and the
+    wired interface provides accurate battery/charging status.
+
     Returns:
         tuple: (device_info_dict, mode_string) or (None, None) if not found.
     """
     devices = hid.enumerate(VENDOR_ID)
 
+    wireless = None
+    wired = None
+
     for dev in devices:
         if dev["product_id"] == PRODUCT_ID_WIRELESS:
             if dev["usage_page"] == USAGE_PAGE_WIRELESS or dev["interface_number"] == 2:
-                return dev, "wireless"
+                wireless = dev
         elif dev["product_id"] == PRODUCT_ID_WIRED:
             if dev["usage_page"] == USAGE_PAGE_WIRED or dev["interface_number"] == 1:
-                return dev, "wired"
+                wired = dev
+
+    if wired:
+        return wired, "wired"
+    if wireless:
+        return wireless, "wireless"
 
     return None, None
 

@@ -39,19 +39,32 @@ CMD_DPI_SET = 0xD3
 
 
 def find_device():
-    """Find the HyperX Pulsefire Dart HID device."""
+    """Find the HyperX Pulsefire Dart HID device.
+
+    Prefers wired over wireless when both are present, since a wired
+    connection means the USB cable is plugged in (charging) and the
+    wired interface provides accurate battery/charging status.
+    """
     try:
         devices = hid.enumerate(VENDOR_ID)
     except Exception:
         return None, None
 
+    wireless = None
+    wired = None
+
     for dev in devices:
         if dev["product_id"] == PRODUCT_ID_WIRELESS:
             if dev["usage_page"] == USAGE_PAGE_WIRELESS or dev["interface_number"] == 2:
-                return dev, "wireless"
+                wireless = dev
         elif dev["product_id"] == PRODUCT_ID_WIRED:
             if dev["usage_page"] == USAGE_PAGE_WIRED or dev["interface_number"] == 1:
-                return dev, "wired"
+                wired = dev
+
+    if wired:
+        return wired, "wired"
+    if wireless:
+        return wireless, "wireless"
 
     return None, None
 
