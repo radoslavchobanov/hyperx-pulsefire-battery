@@ -1,4 +1,4 @@
-"""Widget sections for the HyperX configuration panel."""
+"""Widget sections for the mouse configuration panel."""
 
 from plasmangenuity.widgets.info_section import InfoSection
 from plasmangenuity.widgets.settings_section import SettingsSection

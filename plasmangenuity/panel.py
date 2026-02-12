@@ -1,11 +1,11 @@
-"""Configuration panel popup for HyperX Pulsefire Dart mouse - Plasma style."""
+"""Configuration panel popup for wireless mouse - Plasma style."""
 
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QPushButton,
     QLabel, QApplication, QMessageBox, QGraphicsDropShadowEffect
 )
-from PyQt5.QtCore import Qt, QPoint, QRect, QPropertyAnimation, QEasingCurve
-from PyQt5.QtGui import QPainter, QColor, QPainterPath, QRegion, QPalette
+from PyQt5.QtCore import Qt, QPoint
+from PyQt5.QtGui import QPainter, QColor, QPainterPath, QRegion
 
 from plasmangenuity.device import HyperXDevice
 from plasmangenuity.widgets import (
@@ -15,16 +15,32 @@ from plasmangenuity.widgets import (
 
 
 class ConfigPanel(QWidget):
-    """Plasma-style popup configuration panel for the HyperX mouse."""
+    """Plasma-style popup configuration panel for a wireless mouse."""
 
     PANEL_WIDTH = 500
     PANEL_HEIGHT = 600
     CORNER_RADIUS = 10
     MARGIN_FROM_EDGE = 8
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, device_info=None, driver=None):
+        """Create the config panel.
+
+        Args:
+            parent: Parent widget.
+            device_info: A DeviceInfo object (from the new system). Optional.
+            driver: A HidMouseDriver instance (for config features). Optional.
+        """
         super().__init__(parent)
-        self._device = HyperXDevice()
+        self._device_info = device_info
+        self._driver = driver
+
+        # Legacy path: if no driver provided, use HyperXDevice for backward compat.
+        # The widget sections still expect HyperXDevice-compatible interface.
+        if driver is None:
+            self._device = HyperXDevice()
+        else:
+            self._device = driver
+
         self._sections = []
         self._setup_window()
         self._setup_ui()
@@ -35,18 +51,16 @@ class ConfigPanel(QWidget):
             Qt.Window |
             Qt.FramelessWindowHint |
             Qt.WindowStaysOnTopHint |
-            Qt.Tool  # Prevents taskbar entry
+            Qt.Tool
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setFixedSize(self.PANEL_WIDTH, self.PANEL_HEIGHT)
 
     def _setup_ui(self):
         """Build the panel UI with Plasma styling."""
-        # Main container
         self._container = QWidget(self)
         self._container.setObjectName("panelContainer")
 
-        # Plasma Breeze-like dark theme
         self._container.setStyleSheet("""
             #panelContainer {
                 background-color: rgba(35, 38, 41, 245);
@@ -207,13 +221,21 @@ class ConfigPanel(QWidget):
         header_layout = QHBoxLayout()
         header_layout.setSpacing(10)
 
-        title_label = QLabel("HyperX Pulsefire Dart")
+        # Dynamic title from device info
+        title_text = "Wireless Mouse"
+        if self._device_info:
+            title_text = self._device_info.name or title_text
+        elif hasattr(self._device, 'brand'):
+            title_text = f"{self._device.brand} Mouse"
+        else:
+            title_text = "HyperX Pulsefire Dart"
+
+        title_label = QLabel(title_text)
         title_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #eff0f1;")
         header_layout.addWidget(title_label)
         header_layout.addStretch()
 
-        # Close button (Plasma style)
-        close_btn = QPushButton("×")
+        close_btn = QPushButton("\u00d7")
         close_btn.setFixedSize(28, 28)
         close_btn.setStyleSheet("""
             QPushButton {
@@ -235,7 +257,12 @@ class ConfigPanel(QWidget):
         header_layout.addWidget(close_btn)
         container_layout.addLayout(header_layout)
 
-        # Tab widget with Plasma styling
+        # Determine capabilities
+        caps = None
+        if self._device_info:
+            caps = self._device_info.capabilities
+
+        # Tab widget
         self._tabs = QTabWidget()
         self._tabs.setStyleSheet("""
             QTabWidget::pane {
@@ -263,62 +290,72 @@ class ConfigPanel(QWidget):
             }
         """)
 
-        # Create sections
+        # Always add Info tab
         self._info_section = InfoSection(self._device)
-        self._settings_section = SettingsSection(self._device)
-        self._led_section = LedSection(self._device)
-        self._dpi_section = DpiSection(self._device)
-        self._buttons_section = ButtonsSection(self._device)
-        self._macros_section = MacrosSection(self._device)
-
-        self._sections = [
-            self._info_section,
-            self._settings_section,
-            self._led_section,
-            self._dpi_section,
-            self._buttons_section,
-            self._macros_section,
-        ]
-
         self._tabs.addTab(self._info_section, "Info")
-        self._tabs.addTab(self._dpi_section, "DPI")
-        self._tabs.addTab(self._led_section, "LED")
-        self._tabs.addTab(self._buttons_section, "Buttons")
-        self._tabs.addTab(self._macros_section, "Macros")
-        self._tabs.addTab(self._settings_section, "Settings")
+        self._sections.append(self._info_section)
+
+        # Conditionally add config tabs based on capabilities
+        has_config = caps is None or caps.dpi  # None = legacy mode, show all
+
+        if has_config:
+            self._dpi_section = DpiSection(self._device)
+            self._tabs.addTab(self._dpi_section, "DPI")
+            self._sections.append(self._dpi_section)
+
+        if caps is None or caps.led:
+            self._led_section = LedSection(self._device)
+            self._tabs.addTab(self._led_section, "LED")
+            self._sections.append(self._led_section)
+
+        if caps is None or caps.buttons:
+            self._buttons_section = ButtonsSection(self._device)
+            self._tabs.addTab(self._buttons_section, "Buttons")
+            self._sections.append(self._buttons_section)
+
+        if caps is None or caps.macros:
+            self._macros_section = MacrosSection(self._device)
+            self._tabs.addTab(self._macros_section, "Macros")
+            self._sections.append(self._macros_section)
+
+        if caps is None or caps.polling_rate:
+            self._settings_section = SettingsSection(self._device)
+            self._tabs.addTab(self._settings_section, "Settings")
+            self._sections.append(self._settings_section)
 
         container_layout.addWidget(self._tabs)
 
-        # Save button (Plasma accent style)
-        save_layout = QHBoxLayout()
-        save_layout.addStretch()
-        self._save_btn = QPushButton("Save to Device Memory")
-        self._save_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3daee9;
-                border: none;
-                border-radius: 4px;
-                color: white;
-                font-weight: bold;
-                padding: 8px 20px;
-            }
-            QPushButton:hover {
-                background-color: #5bc0f2;
-            }
-            QPushButton:pressed {
-                background-color: #2d9ad8;
-            }
-        """)
-        self._save_btn.clicked.connect(self._on_save_clicked)
-        save_layout.addWidget(self._save_btn)
-        container_layout.addLayout(save_layout)
+        # Save button — only show if the device supports saving
+        has_save = caps is None or caps.dpi  # devices with config support saving
+        if has_save:
+            save_layout = QHBoxLayout()
+            save_layout.addStretch()
+            self._save_btn = QPushButton("Save to Device Memory")
+            self._save_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #3daee9;
+                    border: none;
+                    border-radius: 4px;
+                    color: white;
+                    font-weight: bold;
+                    padding: 8px 20px;
+                }
+                QPushButton:hover {
+                    background-color: #5bc0f2;
+                }
+                QPushButton:pressed {
+                    background-color: #2d9ad8;
+                }
+            """)
+            self._save_btn.clicked.connect(self._on_save_clicked)
+            save_layout.addWidget(self._save_btn)
+            container_layout.addLayout(save_layout)
 
         # Main layout
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.addWidget(self._container)
 
-        # Add drop shadow
         shadow = QGraphicsDropShadowEffect()
         shadow.setBlurRadius(20)
         shadow.setXOffset(0)
@@ -327,7 +364,6 @@ class ConfigPanel(QWidget):
         self._container.setGraphicsEffect(shadow)
 
     def paintEvent(self, event):
-        """Custom paint for rounded corners."""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         path = QPainterPath()
@@ -339,38 +375,33 @@ class ConfigPanel(QWidget):
         self.setMask(region)
 
     def showEvent(self, event):
-        """Open device connection when panel is shown."""
         super().showEvent(event)
-        if self._device.open():
+        if hasattr(self._device, 'open') and callable(self._device.open):
+            # Legacy HyperXDevice: auto-discover and open
+            if not hasattr(self._device, 'is_open') or not self._device.is_open:
+                self._device.open()
+
+        if hasattr(self._device, 'is_open') and self._device.is_open:
             for section in self._sections:
                 section.refresh()
         else:
             self._info_section._set_disconnected()
 
     def hideEvent(self, event):
-        """Close device connection when panel is hidden."""
         super().hideEvent(event)
-        self._device.close()
+        if hasattr(self._device, 'close'):
+            self._device.close()
 
     def popup_at_tray(self, cursor_pos: QPoint):
-        """Position and show the panel above the system tray.
-
-        Args:
-            cursor_pos: QPoint of cursor position when clicked
-        """
         screen = QApplication.screenAt(cursor_pos)
         if not screen:
             screen = QApplication.primaryScreen()
 
         screen_geo = screen.availableGeometry()
 
-        # Position panel at bottom-right, above the taskbar area
-        # Horizontally: align to right side of screen with margin
         panel_x = screen_geo.right() - self.PANEL_WIDTH - self.MARGIN_FROM_EDGE
-        # Vertically: at the bottom of available screen area
         panel_y = screen_geo.bottom() - self.PANEL_HEIGHT - self.MARGIN_FROM_EDGE
 
-        # Keep panel on screen
         if panel_x < screen_geo.left() + self.MARGIN_FROM_EDGE:
             panel_x = screen_geo.left() + self.MARGIN_FROM_EDGE
         elif panel_x + self.PANEL_WIDTH > screen_geo.right() - self.MARGIN_FROM_EDGE:
@@ -387,15 +418,15 @@ class ConfigPanel(QWidget):
         self.activateWindow()
 
     def _on_save_clicked(self):
-        """Save settings to device memory."""
-        if not self._device.is_open:
+        device = self._device
+        if hasattr(device, 'is_open') and not device.is_open:
             QMessageBox.warning(
                 self, "Not Connected",
                 "Cannot save: Device is not connected."
             )
             return
 
-        if self._device.save_to_memory():
+        if device.save_to_memory():
             QMessageBox.information(
                 self, "Saved",
                 "Settings saved to device memory.\n"

@@ -1,84 +1,137 @@
 #!/usr/bin/env python3
-"""Command-line interface for reading HyperX Pulsefire Dart battery status."""
+"""Command-line interface for PlasmaNGenuity wireless mouse battery monitor."""
 
 import sys
 import json
 import time
 import argparse
 
-from plasmangenuity.device import find_device, get_battery_status, list_devices
+from plasmangenuity.config import load_config
+from plasmangenuity.core.manager import _DeviceManagerCore
+from plasmangenuity.providers.upower import UPowerProvider
+from plasmangenuity.providers.sysfs import SysfsProvider
+from plasmangenuity.providers.hid_driver import HidDriverProvider
+
+
+def _create_manager() -> _DeviceManagerCore:
+    """Create a DeviceManager with all enabled providers."""
+    config = load_config()
+    providers_cfg = config.get("providers", {})
+
+    mgr = _DeviceManagerCore()
+    if providers_cfg.get("upower", True):
+        mgr.register_provider(UPowerProvider())
+    if providers_cfg.get("sysfs", True):
+        mgr.register_provider(SysfsProvider())
+    if providers_cfg.get("hid", True):
+        mgr.register_provider(HidDriverProvider())
+    return mgr
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="HyperX Pulsefire Dart Battery Monitor",
+        description="PlasmaNGenuity — Wireless Mouse Battery Monitor",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
 Examples:
-  %(prog)s              Show battery status
+  %(prog)s              Show battery status for all wireless mice
   %(prog)s --json       Output as JSON (for scripts/waybar)
-  %(prog)s --list       List all HyperX devices
+  %(prog)s --list       List all detected devices with details
   %(prog)s --watch      Continuously monitor battery
+  %(prog)s --device KEY Filter to a specific device by stable key
 """,
     )
-    parser.add_argument("--list", "-l", action="store_true", help="List all HyperX devices")
+    parser.add_argument("--list", "-l", action="store_true", help="List all detected devices")
     parser.add_argument("--json", "-j", action="store_true", help="Output as JSON")
     parser.add_argument("--watch", "-w", action="store_true", help="Continuously monitor battery")
+    parser.add_argument("--device", "-d", type=str, default=None, help="Filter to a specific device key")
     parser.add_argument(
         "--interval", "-i", type=int, default=30, help="Watch interval in seconds (default: 30)"
     )
 
     args = parser.parse_args()
+    mgr = _create_manager()
 
     if args.list:
-        devices = list_devices()
+        devices = mgr.scan_once()
         if not devices:
-            print("No HyperX devices found.")
+            print("No wireless mice found.")
             print("\nTroubleshooting:")
             print("  1. Make sure the mouse/dongle is connected")
-            print("  2. Check udev rules are installed (see README)")
-            print("  3. Try running with sudo")
+            print("  2. For HyperX mice, check udev rules are installed (see README)")
+            print("  3. For Logitech/BLE mice, ensure UPower daemon is running")
             return 0
 
-        print(f"Found {len(devices)} HyperX USB interface(s):\n")
+        print(f"Found {len(devices)} device(s):\n")
         for dev in devices:
-            for key, val in dev.items():
-                print(f"  {key}: {val}")
+            batt = f"{dev.battery.percent}%" if dev.battery and dev.battery.percent is not None else "N/A"
+            charging = " (charging)" if dev.battery and dev.battery.is_charging else ""
+            caps = [k for k in ("dpi", "led", "buttons", "macros")
+                    if getattr(dev.capabilities, k, False)]
+
+            print(f"  {dev.name}")
+            print(f"    Key:        {dev.device_id.stable_key}")
+            print(f"    Brand:      {dev.brand}")
+            print(f"    Battery:    {batt}{charging}")
+            print(f"    Connection: {dev.connection.name.lower()}")
+            print(f"    Source:     {dev.device_id.provider.name.lower()}")
+            if dev.driver_name:
+                print(f"    Driver:     {dev.driver_name}")
+            if caps:
+                print(f"    Config:     {', '.join(caps)}")
             print()
         return 0
 
-    device_info, mode = find_device()
-
-    if not device_info:
-        if args.json:
-            print(json.dumps({"error": "Device not found"}))
-        else:
-            print("Error: HyperX Pulsefire Dart not found.")
-            print("\nMake sure:")
-            print("  - The wireless dongle is plugged in (for wireless mode)")
-            print("  - Or the mouse is connected via USB cable (for wired mode)")
-            print("  - udev rules are installed (see README)")
-            print("\nRun with --list to see all HyperX devices.")
-        return 1
-
-    device_path = device_info["path"]
+    def get_devices():
+        devices = mgr.scan_once()
+        if args.device:
+            devices = [d for d in devices if d.device_id.stable_key == args.device]
+        return devices
 
     def print_status():
-        battery, charging, error = get_battery_status(device_path)
+        devices = get_devices()
 
-        if error:
+        if not devices:
             if args.json:
-                print(json.dumps({"error": error}))
+                print(json.dumps({"error": "No devices found"}))
             else:
-                print(f"Error: {error}")
+                if args.device:
+                    print(f"Error: Device '{args.device}' not found.")
+                else:
+                    print("Error: No wireless mice found.")
+                    print("\nMake sure:")
+                    print("  - The wireless dongle is plugged in (for USB dongle mice)")
+                    print("  - Or Bluetooth is paired and connected")
+                    print("  - For HyperX mice, udev rules are installed (see README)")
+                    print("\nRun with --list to see all detected devices.")
             return False
 
         if args.json:
-            print(json.dumps({"battery_percent": battery, "is_charging": charging, "mode": mode}))
+            result = []
+            for dev in devices:
+                entry = {
+                    "name": dev.name,
+                    "key": dev.device_id.stable_key,
+                    "brand": dev.brand,
+                    "connection": dev.connection.name.lower(),
+                    "source": dev.device_id.provider.name.lower(),
+                }
+                if dev.battery:
+                    entry["battery_percent"] = dev.battery.percent
+                    entry["is_charging"] = dev.battery.is_charging
+                if dev.driver_name:
+                    entry["driver"] = dev.driver_name
+                result.append(entry)
+            # Single device: flat object for waybar compat; multi: array
+            if len(result) == 1:
+                print(json.dumps(result[0]))
+            else:
+                print(json.dumps(result))
         else:
-            charging_str = " (charging)" if charging else ""
-            print(f"Battery: {battery}%{charging_str}")
-            print(f"Mode: {mode}")
+            for dev in devices:
+                batt = f"{dev.battery.percent}%" if dev.battery and dev.battery.percent is not None else "N/A"
+                charging = " (charging)" if dev.battery and dev.battery.is_charging else ""
+                print(f"{dev.name}: {batt}{charging}")
 
         return True
 

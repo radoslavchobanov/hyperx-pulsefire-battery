@@ -1,5 +1,6 @@
-# PlasmaNGenuity - udev rules for HyperX Pulsefire Dart mouse
-# Allows non-root access to the HID interface for battery monitoring
+# PlasmaNGenuity - udev rules for HID mice requiring proprietary protocols
+# Only needed for mice that don't expose battery via UPower/sysfs (e.g., HyperX)
+# Logitech, BLE, and most other mice work without these rules.
 #
 # Installation:
 #   sudo cp 99-plasmangenuity.rules /etc/udev/rules.d/

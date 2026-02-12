@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """
 PlasmaNGenuity - Plasma Widget Backend
-Outputs comprehensive device status as JSON for the KDE Plasma applet
+Outputs comprehensive device status as JSON for the KDE Plasma applet.
 Supports both read and write operations.
+
+Uses the unified DeviceManager to discover all wireless mice (UPower,
+sysfs, HID), and falls back to direct HID for write operations on
+supported devices.
 """
 
 import json
@@ -10,233 +14,201 @@ import sys
 import time
 import argparse
 
-try:
-    import hid
-except ImportError:
-    print(json.dumps({
-        "error": "hidapi not installed",
-        "connected": False
-    }))
-    sys.exit(0)
 
-# HyperX Pulsefire Dart USB IDs
-VENDOR_ID = 0x0951
-PRODUCT_ID_WIRELESS = 0x16E1
-PRODUCT_ID_WIRED = 0x16E2
-USAGE_PAGE_WIRELESS = 0xFF00
-USAGE_PAGE_WIRED = 0xFF13
+def cmd_read():
+    """Read all device data via the unified DeviceManager."""
+    try:
+        from plasmangenuity.core.manager import _DeviceManagerCore
+        from plasmangenuity.providers.upower import UPowerProvider
+        from plasmangenuity.providers.sysfs import SysfsProvider
+        from plasmangenuity.providers.hid_driver import HidDriverProvider
+    except ImportError:
+        return _cmd_read_legacy()
 
-# HID packet size
-PACKET_SIZE = 64
+    mgr = _DeviceManagerCore()
+    mgr.register_provider(UPowerProvider())
+    mgr.register_provider(SysfsProvider())
+    mgr.register_provider(HidDriverProvider())
 
-# Command bytes (from protocol.py)
-CMD_HW_INFO = 0x50
-CMD_HEARTBEAT = 0x51
-CMD_LED_QUERY = 0x52
-CMD_DPI_QUERY = 0x53
-CMD_LED_SET = 0xD2
-CMD_DPI_SET = 0xD3
+    devices = mgr.scan_once()
+
+    if not devices:
+        return {"error": "Device not found", "connected": False}
+
+    # Pick the primary device (first with HID driver, or first overall)
+    primary = None
+    for d in devices:
+        if d.driver_name:
+            primary = d
+            break
+    if not primary:
+        primary = devices[0]
+
+    result = {
+        "connected": True,
+        "mode": primary.connection.name.lower(),
+        "error": None,
+        "deviceName": primary.name,
+        "brand": primary.brand,
+    }
+
+    if primary.battery:
+        result["battery"] = primary.battery.percent
+        result["charging"] = primary.battery.is_charging
+    else:
+        result["battery"] = None
+        result["charging"] = False
+
+    # If the primary device has an HID driver, get extra info
+    driver = mgr.get_driver(primary.device_id.stable_key)
+    if driver:
+        try:
+            hw_info = driver.get_hw_info()
+            if hw_info:
+                result["hw_info"] = {
+                    "firmware": hw_info.firmware_version,
+                    "device_name": hw_info.device_name or primary.name,
+                    "vendor_id": f"0x{hw_info.vendor_id:04X}",
+                    "product_id": f"0x{hw_info.product_id:04X}",
+                }
+        except Exception:
+            pass
+
+        try:
+            dpi = driver.get_dpi_settings()
+            if dpi:
+                active_profile = dpi.get("active_profile", 0)
+                dpi_values = dpi.get("dpi_values", [])
+                colors = dpi.get("colors", [])
+                profiles = []
+                for i in range(5):
+                    color = colors[i] if i < len(colors) else (255, 255, 255)
+                    profiles.append({
+                        "index": i + 1,
+                        "dpi": dpi_values[i] if i < len(dpi_values) else 800,
+                        "enabled": True,
+                        "active": i == active_profile,
+                        "color": f"#{color[0]:02X}{color[1]:02X}{color[2]:02X}",
+                    })
+                result["dpi"] = {
+                    "active_profile": active_profile + 1,
+                    "profiles": profiles,
+                }
+        except Exception:
+            pass
+
+        try:
+            led = driver.get_led_settings()
+            if led:
+                result["led"] = {
+                    "effect": "Static",
+                    "target": "Both",
+                    "color": f"#{led.red:02X}{led.green:02X}{led.blue:02X}",
+                    "brightness": led.brightness,
+                    "speed": led.speed,
+                }
+        except Exception:
+            pass
+
+    # Include all devices as a list for multi-device display
+    all_devices = []
+    for d in devices:
+        entry = {
+            "name": d.name,
+            "brand": d.brand,
+            "key": d.device_id.stable_key,
+            "connection": d.connection.name.lower(),
+        }
+        if d.battery:
+            entry["battery"] = d.battery.percent
+            entry["charging"] = d.battery.is_charging
+        all_devices.append(entry)
+    result["devices"] = all_devices
+
+    mgr.close()
+    return result
 
 
-def find_device():
-    """Find the HyperX Pulsefire Dart HID device.
+def cmd_set_dpi(profile):
+    """Set DPI profile via the HID driver."""
+    try:
+        from plasmangenuity.core.manager import _DeviceManagerCore
+        from plasmangenuity.providers.hid_driver import HidDriverProvider
+    except ImportError:
+        return _cmd_set_dpi_legacy(profile)
 
-    Prefers wired over wireless when both are present, since a wired
-    connection means the USB cable is plugged in (charging) and the
-    wired interface provides accurate battery/charging status.
-    """
+    mgr = _DeviceManagerCore()
+    mgr.register_provider(HidDriverProvider())
+    devices = mgr.scan_once()
+
+    for d in devices:
+        driver = mgr.get_driver(d.device_id.stable_key)
+        if driver:
+            success = driver.set_dpi_active(profile)
+            mgr.close()
+            return {"success": success, "error": None if success else "Failed to set DPI"}
+
+    mgr.close()
+    return {"success": False, "error": "No configurable device found"}
+
+
+def cmd_set_led(r, g, b, brightness=100):
+    """Set LED color via the HID driver."""
+    try:
+        from plasmangenuity.core.manager import _DeviceManagerCore
+        from plasmangenuity.providers.hid_driver import HidDriverProvider
+    except ImportError:
+        return _cmd_set_led_legacy(r, g, b, brightness)
+
+    mgr = _DeviceManagerCore()
+    mgr.register_provider(HidDriverProvider())
+    devices = mgr.scan_once()
+
+    for d in devices:
+        driver = mgr.get_driver(d.device_id.stable_key)
+        if driver:
+            success = driver.set_led(
+                red=r, green=g, blue=b, brightness=brightness
+            )
+            mgr.close()
+            return {"success": success, "error": None if success else "Failed to set LED"}
+
+    mgr.close()
+    return {"success": False, "error": "No configurable device found"}
+
+
+# === Legacy fallbacks (if plasmangenuity package not installed) ===
+
+def _cmd_read_legacy():
+    """Fallback: read via direct HID (original standalone code)."""
+    try:
+        import hid
+    except ImportError:
+        return {"error": "hidapi not installed", "connected": False}
+
+    VENDOR_ID = 0x0951
+    PRODUCT_ID_WIRELESS = 0x16E1
+    PRODUCT_ID_WIRED = 0x16E2
+    USAGE_PAGE_WIRELESS = 0xFF00
+    USAGE_PAGE_WIRED = 0xFF13
+    PACKET_SIZE = 64
+
     try:
         devices = hid.enumerate(VENDOR_ID)
     except Exception:
-        return None, None
+        return {"error": "HID enumeration failed", "connected": False}
 
-    wireless = None
-    wired = None
+    wireless = wired = None
+    for d in devices:
+        if d["product_id"] == PRODUCT_ID_WIRELESS:
+            if d["usage_page"] == USAGE_PAGE_WIRELESS or d["interface_number"] == 2:
+                wireless = d
+        elif d["product_id"] == PRODUCT_ID_WIRED:
+            if d["usage_page"] == USAGE_PAGE_WIRED or d["interface_number"] == 1:
+                wired = d
 
-    for dev in devices:
-        if dev["product_id"] == PRODUCT_ID_WIRELESS:
-            if dev["usage_page"] == USAGE_PAGE_WIRELESS or dev["interface_number"] == 2:
-                wireless = dev
-        elif dev["product_id"] == PRODUCT_ID_WIRED:
-            if dev["usage_page"] == USAGE_PAGE_WIRED or dev["interface_number"] == 1:
-                wired = dev
-
-    if wired:
-        return wired, "wired"
-    if wireless:
-        return wireless, "wireless"
-
-    return None, None
-
-
-def drain_buffer(dev):
-    """Drain any stale data from the HID buffer."""
-    dev.set_nonblocking(True)
-    try:
-        while True:
-            data = dev.read(PACKET_SIZE, timeout_ms=50)
-            if not data:
-                break
-    except Exception:
-        pass
-    finally:
-        dev.set_nonblocking(False)
-
-
-def send_command(dev, data, retries=3):
-    """Send a command packet and read response with retries."""
-    packet = [0x00] * PACKET_SIZE
-    packet[0] = 0x00  # Report ID
-    for i, byte in enumerate(data):
-        if i + 1 < PACKET_SIZE:
-            packet[i + 1] = byte
-
-    expected_cmd = data[0] if data else None
-
-    for attempt in range(retries):
-        try:
-            dev.write(packet)
-            time.sleep(0.05)
-            response = dev.read(PACKET_SIZE, timeout_ms=1000)
-            if response and len(response) > 0:
-                # Verify response matches expected command
-                if expected_cmd is not None and response[0] == expected_cmd:
-                    return response
-                # If mismatch, try reading again (async response)
-                for _ in range(3):
-                    time.sleep(0.02)
-                    response = dev.read(PACKET_SIZE, timeout_ms=500)
-                    if response and response[0] == expected_cmd:
-                        return response
-            time.sleep(0.05)
-        except Exception:
-            if attempt < retries - 1:
-                time.sleep(0.1)
-            continue
-    return None
-
-
-def get_battery_status(dev):
-    """Query battery status from the mouse."""
-    response = send_command(dev, [CMD_HEARTBEAT])
-    if not response or len(response) < 6 or response[0] != CMD_HEARTBEAT:
-        return None, None
-    return response[4], response[5] == 0x01
-
-
-def get_hw_info(dev):
-    """Query hardware information."""
-    response = send_command(dev, [CMD_HW_INFO])
-    if not response or len(response) < 32 or response[0] != CMD_HW_INFO:
-        return None
-
-    product_id = response[4] | (response[5] << 8)
-    vendor_id = response[6] | (response[7] << 8)
-
-    name_bytes = response[12:44]
-    try:
-        null_idx = list(name_bytes).index(0)
-    except ValueError:
-        null_idx = len(name_bytes)
-    device_name = bytes(name_bytes[:null_idx]).decode('ascii', errors='ignore')
-
-    firmware_version = f"{response[3]}.0.0"
-
-    return {
-        "firmware": firmware_version,
-        "device_name": device_name.strip() or "HyperX Pulsefire Dart",
-        "vendor_id": f"0x{vendor_id:04X}",
-        "product_id": f"0x{product_id:04X}"
-    }
-
-
-def get_dpi_settings(dev):
-    """Query DPI settings."""
-    response = send_command(dev, [CMD_DPI_QUERY])
-    if not response or len(response) < 30 or response[0] != CMD_DPI_QUERY:
-        return None
-
-    active_profile = response[5]
-
-    dpi_offsets = [10, 12, 14, 16, 18]
-    dpi_values = []
-    for offset in dpi_offsets:
-        raw = response[offset] | (response[offset + 1] << 8)
-        dpi_values.append(raw * 50)
-
-    colors = []
-    for i in range(5):
-        offset = 22 + i * 3
-        if offset + 2 < len(response):
-            r, g, b = response[offset], response[offset + 1], response[offset + 2]
-            colors.append(f"#{r:02X}{g:02X}{b:02X}")
-        else:
-            colors.append("#FFFFFF")
-
-    profiles = []
-    for i in range(5):
-        profiles.append({
-            "index": i + 1,
-            "dpi": dpi_values[i] if i < len(dpi_values) else 800,
-            "enabled": True,
-            "active": i == active_profile,
-            "color": colors[i] if i < len(colors) else "#FFFFFF"
-        })
-
-    return {
-        "active_profile": active_profile + 1,
-        "profiles": profiles
-    }
-
-
-def get_led_settings(dev):
-    """Query LED settings."""
-    response = send_command(dev, [CMD_LED_QUERY])
-    if not response or len(response) < 21 or response[0] != CMD_LED_QUERY:
-        return None
-
-    brightness = response[17]
-    r = response[18]
-    g = response[19]
-    b = response[20]
-
-    return {
-        "effect": "Static",
-        "target": "Both",
-        "color": f"#{r:02X}{g:02X}{b:02X}",
-        "brightness": brightness,
-        "speed": 0
-    }
-
-
-def set_dpi_profile(dev, profile):
-    """Set active DPI profile (0-4)."""
-    profile = max(0, min(4, profile))
-    response = send_command(dev, [CMD_DPI_SET, 0x00, profile, 0x00])
-    return response is not None
-
-
-def set_led_color(dev, r, g, b, brightness=100):
-    """Set LED color (static mode, both zones)."""
-    brightness = max(0, min(100, brightness))
-    # CMD_LED_SET, target=Both(0x20), effect=Static(0x00), length=8,
-    # R, G, B, R2, G2, B2, brightness, speed
-    response = send_command(dev, [
-        CMD_LED_SET,
-        0x20,  # Both zones
-        0x00,  # Static effect
-        0x08,  # Data length
-        r, g, b,  # Primary color
-        r, g, b,  # Secondary color
-        brightness,
-        0x00   # Speed (not used for static)
-    ])
-    return response is not None
-
-
-def cmd_read():
-    """Read all device data."""
-    device_info, mode = find_device()
+    device_info = wired or wireless
+    mode = "wired" if wired else ("wireless" if wireless else None)
 
     if not device_info:
         return {"error": "Device not found", "connected": False}
@@ -247,102 +219,41 @@ def cmd_read():
         dev.open_path(device_info["path"])
         dev.set_nonblocking(False)
 
-        result = {
-            "connected": True,
-            "mode": mode,
-            "error": None
-        }
+        # Drain buffer
+        dev.set_nonblocking(True)
+        while dev.read(PACKET_SIZE, timeout_ms=50):
+            pass
+        dev.set_nonblocking(False)
 
-        # Drain any stale data from buffer
-        drain_buffer(dev)
+        result = {"connected": True, "mode": mode, "error": None}
+
+        # Battery
+        packet = [0x00] * PACKET_SIZE
+        packet[1] = 0x51
+        dev.write(packet)
         time.sleep(0.05)
-
-        battery, charging = get_battery_status(dev)
-        result["battery"] = battery
-        result["charging"] = charging if battery is not None else False
-
-        time.sleep(0.02)
-
-        hw_info = get_hw_info(dev)
-        if hw_info:
-            result["hw_info"] = hw_info
-
-        time.sleep(0.02)
-
-        dpi_settings = get_dpi_settings(dev)
-        if dpi_settings:
-            result["dpi"] = dpi_settings
-
-        time.sleep(0.02)
-
-        led_settings = get_led_settings(dev)
-        if led_settings:
-            result["led"] = led_settings
+        resp = dev.read(PACKET_SIZE, timeout_ms=1000)
+        if resp and resp[0] == 0x51:
+            result["battery"] = resp[4]
+            result["charging"] = resp[5] == 0x01
 
         return result
-
-    except IOError as e:
-        return {"error": f"IO Error: {e}", "connected": False}
     except Exception as e:
         return {"error": str(e), "connected": False}
     finally:
         if dev:
             try:
                 dev.close()
-            except:
+            except Exception:
                 pass
 
 
-def cmd_set_dpi(profile):
-    """Set DPI profile."""
-    device_info, mode = find_device()
-    if not device_info:
-        return {"success": False, "error": "Device not found"}
-
-    dev = None
-    try:
-        dev = hid.device()
-        dev.open_path(device_info["path"])
-        dev.set_nonblocking(False)
-        time.sleep(0.05)
-
-        success = set_dpi_profile(dev, profile)
-        return {"success": success, "error": None if success else "Failed to set DPI"}
-
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-    finally:
-        if dev:
-            try:
-                dev.close()
-            except:
-                pass
+def _cmd_set_dpi_legacy(profile):
+    return {"success": False, "error": "plasmangenuity package not installed"}
 
 
-def cmd_set_led(r, g, b, brightness=100):
-    """Set LED color."""
-    device_info, mode = find_device()
-    if not device_info:
-        return {"success": False, "error": "Device not found"}
-
-    dev = None
-    try:
-        dev = hid.device()
-        dev.open_path(device_info["path"])
-        dev.set_nonblocking(False)
-        time.sleep(0.05)
-
-        success = set_led_color(dev, r, g, b, brightness)
-        return {"success": success, "error": None if success else "Failed to set LED"}
-
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-    finally:
-        if dev:
-            try:
-                dev.close()
-            except:
-                pass
+def _cmd_set_led_legacy(r, g, b, brightness):
+    return {"success": False, "error": "plasmangenuity package not installed"}
 
 
 def main():
@@ -357,7 +268,7 @@ def main():
     args = parser.parse_args()
 
     if args.set_dpi is not None:
-        profile = args.set_dpi - 1  # Convert to 0-indexed
+        profile = args.set_dpi - 1
         result = cmd_set_dpi(profile)
         print(json.dumps(result))
     elif args.set_led is not None:

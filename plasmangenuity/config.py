@@ -1,7 +1,8 @@
-"""Configuration management for HyperX Pulsefire Dart tool."""
+"""Configuration management for PlasmaNGenuity."""
 
 import json
 import os
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -43,17 +44,44 @@ DEFAULTS = {
         "polling_rate_hz": 1000,
         "battery_alert_percent": 10,
     },
+
+    # Per-device overrides, keyed by stable_key (e.g. "0951:16e1")
+    "devices": {},
+
+    # Provider toggles
+    "providers": {
+        "upower": True,
+        "sysfs": True,
+        "hid": True,
+    },
 }
+
+
+def _get_base_config_dir() -> Path:
+    """Get the XDG config base directory."""
+    xdg_config = os.environ.get("XDG_CONFIG_HOME", "")
+    if xdg_config:
+        return Path(xdg_config)
+    return Path.home() / ".config"
+
+
+def _migrate_old_config() -> None:
+    """Migrate config from old ~/.config/hyperx-pulsefire/ to ~/.config/plasmangenuity/."""
+    base = _get_base_config_dir()
+    old_dir = base / "hyperx-pulsefire"
+    new_dir = base / "plasmangenuity"
+
+    if old_dir.exists() and not new_dir.exists():
+        old_config = old_dir / "config.json"
+        if old_config.exists():
+            new_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(old_config), str(new_dir / "config.json"))
 
 
 def get_config_dir() -> Path:
     """Get the configuration directory, creating it if needed."""
-    xdg_config = os.environ.get("XDG_CONFIG_HOME", "")
-    if xdg_config:
-        config_dir = Path(xdg_config) / "hyperx-pulsefire"
-    else:
-        config_dir = Path.home() / ".config" / "hyperx-pulsefire"
-
+    _migrate_old_config()
+    config_dir = _get_base_config_dir() / "plasmangenuity"
     config_dir.mkdir(parents=True, exist_ok=True)
     return config_dir
 
@@ -136,6 +164,21 @@ def set(key: str, value: Any) -> bool:
     return save_config(config)
 
 
+def get_device_config(stable_key: str) -> dict:
+    """Get per-device config overrides for a specific device."""
+    config = load_config()
+    return config.get("devices", {}).get(stable_key, {})
+
+
+def set_device_config(stable_key: str, key: str, value: Any) -> bool:
+    """Set a per-device config value."""
+    config = load_config()
+    devices = config.setdefault("devices", {})
+    device = devices.setdefault(stable_key, {})
+    device[key] = value
+    return save_config(config)
+
+
 # Convenience accessors
 class Config:
     """Configuration accessor with attribute-style access."""
@@ -176,6 +219,10 @@ class Config:
     @property
     def device_defaults(self) -> dict:
         return self._config.get("device_defaults", DEFAULTS["device_defaults"])
+
+    @property
+    def providers(self) -> dict:
+        return self._config.get("providers", DEFAULTS["providers"])
 
     def __getitem__(self, key: str) -> Any:
         return get(key)
